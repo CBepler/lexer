@@ -2,7 +2,7 @@ use lexor::*;
 
 #[test]
 fn verilog_subset_macro() {
-    let language = define_language! {
+    let language_result = define_language! {
         ignore_token!("WHITESPACE", r"^\s+"),
         single_line_comment!("SINGLE_LINE_COMMENT", r"//"),
 
@@ -20,4 +20,11 @@ fn verilog_subset_macro() {
         keyword!("COMMA", r"^\,"),
         keyword!("SEMICOLON", r"^\;"),
     };
+
+    assert!(
+        language_result.is_ok(),
+        "Failed to define verilog-like Language: {:?}",
+        language_result.unwrap_err()
+    );
+    println!("Successfully defined verilog-like Language!");
 }

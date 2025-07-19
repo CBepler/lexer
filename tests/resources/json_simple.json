@@ -1,0 +1,12 @@
+{
+    "name": "Lexor Demo",
+    "version": 1.0,
+    "active": true,
+    "data": [
+        123,
+        "item",
+        false,
+        null
+    ],
+    "message": "Hello, \"World\"!"
+}
