@@ -100,3 +100,116 @@ macro_rules! define_language {
         )
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::language::{
+        CommentEndCondition, PairDefinition, PairDirection, TokenBehavior, TokenDefinition,
+    };
+    use regex::Regex;
+
+    fn create_expected_token(
+        name: &str,
+        regex_str: &str,
+        behavior: TokenBehavior,
+    ) -> TokenDefinition {
+        TokenDefinition::new(name.to_string(), regex_str, behavior)
+            .expect("test failed in creating token definition")
+    }
+
+    #[test]
+    fn test_keyword_macro() {
+        let result = keyword!("TEST_KEYWORD", r"test");
+        let expected = create_expected_token("TEST_KEYWORD", r"test", TokenBehavior::Keyword);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_store_token_macro() {
+        let result = store_token!("TEST_IDENT", r"[a-z]+");
+        let expected = create_expected_token("TEST_IDENT", r"[a-z]+", TokenBehavior::Store);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_ignore_token_macro() {
+        let result = ignore_token!("WHITESPACE", r"\s+");
+        let expected = create_expected_token("WHITESPACE", r"\s+", TokenBehavior::Ignore);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_open_pair_macro() {
+        let result = open_pair!("L_BRACE", r"\{", "R_BRACE");
+        let expected = create_expected_token(
+            "L_BRACE",
+            r"\{",
+            TokenBehavior::Pair(PairDefinition::new(
+                PairDirection::Open,
+                "R_BRACE".to_string(),
+            )),
+        );
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_close_pair_macro() {
+        let result = close_pair!("R_BRACE", r"\}", "L_BRACE");
+        let expected = create_expected_token(
+            "R_BRACE",
+            r"\}",
+            TokenBehavior::Pair(PairDefinition::new(
+                PairDirection::Close,
+                "L_BRACE".to_string(),
+            )),
+        );
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_single_line_comment_macro() {
+        let result = single_line_comment!("SINGLE_COMMENT", r"//.*");
+        let expected = create_expected_token(
+            "SINGLE_COMMENT",
+            r"//.*",
+            TokenBehavior::CommentStart(CommentEndCondition::Newline),
+        );
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_multi_line_comment_macro() {
+        let result = multi_line_comment!("MULTI_COMMENT", r"/\*", r"\*/");
+        let expected = create_expected_token(
+            "MULTI_COMMENT",
+            r"/\*",
+            TokenBehavior::CommentStart(CommentEndCondition::Regex(Regex::new(r"\*/").unwrap())),
+        );
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_define_language_macro_success() {
+        let module_token = keyword!("MODULE", r"^module\b");
+        let identifier_token = store_token!("IDENTIFIER", r"^[a-zA-Z_][a-zA-Z0-9_]*");
+        let open_paren_token = open_pair!("LEFT_PAREN", r"^\(", "RIGHT_PAREN");
+        let close_paren_token = close_pair!("RIGHT_PAREN", r"^\)", "LEFT_PAREN");
+
+        let language_result = define_language! {
+            module_token,
+            identifier_token,
+            open_paren_token,
+            close_paren_token,
+        };
+
+        assert!(language_result.is_ok());
+        let language = language_result.unwrap();
+        let definitions = language.get_token_definitions();
+
+        assert_eq!(definitions.len(), 4);
+        assert!(definitions.iter().any(|t| t.get_name() == "MODULE"));
+        assert!(definitions.iter().any(|t| t.get_name() == "IDENTIFIER"));
+        assert!(definitions.iter().any(|t| t.get_name() == "LEFT_PAREN"));
+        assert!(definitions.iter().any(|t| t.get_name() == "RIGHT_PAREN"));
+    }
+}

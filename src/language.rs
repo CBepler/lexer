@@ -1,6 +1,20 @@
-use regex::Regex;
 use std::collections::HashSet;
 
+pub use token_definition::{
+    TokenDefinition,
+    token_behavior::{
+        TokenBehavior,
+        comment_end_condition::CommentEndCondition,
+        pair_definition::{PairDefinition, PairDirection},
+    },
+};
+
+#[cfg(test)]
+use super::*;
+
+pub mod token_definition;
+
+#[derive(Debug)]
 pub struct Language {
     token_definitions: Vec<TokenDefinition>,
 }
@@ -13,23 +27,27 @@ impl Language {
         let mut expected_pairs = HashSet::<(String, String)>::new();
 
         for tok in &tokens {
-            match &tok.behavior {
-                TokenBehavior::Pair(pair_def) => match pair_def.pair_type {
+            match &tok.get_behavior() {
+                TokenBehavior::Pair(pair_def) => match pair_def.get_pair_type() {
                     PairDirection::Open => {
-                        open_pair_names.insert(tok.name.clone());
-                        expected_pairs
-                            .insert((tok.name.clone(), pair_def.counterpart_name.clone()));
+                        open_pair_names.insert(tok.get_name().to_string());
+                        expected_pairs.insert((
+                            tok.get_name().to_string(),
+                            pair_def.get_counterpart_name().to_string(),
+                        ));
                     }
                     PairDirection::Close => {
-                        close_pair_names.insert(tok.name.clone());
-                        expected_pairs
-                            .insert((tok.name.clone(), pair_def.counterpart_name.clone()));
+                        close_pair_names.insert(tok.get_name().to_string());
+                        expected_pairs.insert((
+                            pair_def.get_counterpart_name().to_string(),
+                            tok.get_name().to_string(),
+                        ));
                     }
                 },
                 _ => (),
             };
-            if !token_names.insert(tok.name.clone()) {
-                return Err(format!("Duplicate token name found: '{}'", tok.name));
+            if !token_names.insert(tok.get_name().to_string()) {
+                return Err(format!("Duplicate token name found: '{}'", tok.get_name()));
             }
         }
         if let Err(e) = Self::check_pairs(&expected_pairs, &open_pair_names, &close_pair_names) {
@@ -75,83 +93,119 @@ impl Language {
     }
 }
 
-pub struct TokenDefinition {
-    name: String,
-    regex: Regex,
-    behavior: TokenBehavior,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl TokenDefinition {
-    pub fn new(name: String, regex_str: &str, behavior: TokenBehavior) -> Result<Self, String> {
-        let compiled_regex = Regex::new(regex_str)
-            .map_err(|e| format!("Invalid regex for token '{}': {}", name, e))?;
+    #[test]
+    fn language_new_correct_creates_language() {
+        let module_result = keyword!("MODULE", r"module\b");
+        let identifier_result = store_token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*");
+        let open_paren_result = open_pair!("LEFT_PAREN", r"\(", "RIGHT_PAREN");
+        let close_paren_result = close_pair!("RIGHT_PAREN", r"\)", "LEFT_PAREN");
+        let input_result = keyword!("INPUT", r"input\b");
+        let wire_result = keyword!("WIRE", r"wire\b");
+        let comma_result = keyword!("COMMA", r",");
+        let output_result = keyword!("OUTPUT", r"output\b");
+        let semicolon_result = keyword!("SEMICOLON", r";");
+        let end_module_result = keyword!("END_MODULE", r"endmodule\b");
+        let single_line_comment_result = single_line_comment!("SINGLE_LINE_COMMENT", r"//");
+        let whitespace_result = ignore_token!("WHITESPACE", r"\s+");
 
-        let final_behavior = match behavior {
-            TokenBehavior::CommentStart(CommentEndCondition::RegexStr(end_regex_str)) => {
-                let compiled_end_regex = Regex::new(&end_regex_str)
-                    .map_err(|e| format!("Invalid end regex for comment '{}': {}", name, e))?;
-                TokenBehavior::CommentStart(CommentEndCondition::Regex(compiled_end_regex))
-            }
-            _ => behavior,
+        let language_result = define_language! {
+            whitespace_result,
+            single_line_comment_result,
+
+            module_result,
+            input_result,
+            output_result,
+            wire_result,
+            end_module_result,
+
+            open_paren_result,
+            close_paren_result,
+
+            comma_result,
+            semicolon_result,
+
+            identifier_result,
         };
 
-        Ok(TokenDefinition {
-            name,
-            regex: compiled_regex,
-            behavior: final_behavior,
-        })
+        print!("{:?}", language_result);
+        assert!(language_result.is_ok())
     }
 
-    pub fn get_name(&self) -> &str {
-        &self.name
+    #[test]
+    fn language_new_missing_closing_pair_creates_err() {
+        let module_result = keyword!("MODULE", r"module\b");
+        let identifier_result = store_token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*");
+        let open_paren_result = open_pair!("LEFT_PAREN", r"\(", "RIGHT_PAREN");
+        let input_result = keyword!("INPUT", r"input\b");
+        let wire_result = keyword!("WIRE", r"wire\b");
+        let comma_result = keyword!("COMMA", r",");
+        let output_result = keyword!("OUTPUT", r"output\b");
+        let semicolon_result = keyword!("SEMICOLON", r";");
+        let end_module_result = keyword!("END_MODULE", r"endmodule\b");
+        let single_line_comment_result = single_line_comment!("SINGLE_LINE_COMMENT", r"//");
+        let whitespace_result = ignore_token!("WHITESPACE", r"\s+");
+
+        let language_result = define_language! {
+            whitespace_result,
+            single_line_comment_result,
+
+            module_result,
+            input_result,
+            output_result,
+            wire_result,
+            end_module_result,
+
+            open_paren_result,
+
+            comma_result,
+            semicolon_result,
+
+            identifier_result,
+        };
+
+        assert!(language_result.is_err())
     }
 
-    pub fn get_regex(&self) -> &Regex {
-        &self.regex
+    #[test]
+    fn language_new_duplicate_token_creates_err() {
+        let module_result = keyword!("MODULE", r"module\b");
+        let identifier_result = store_token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*");
+        let open_paren_result = open_pair!("LEFT_PAREN", r"\(", "RIGHT_PAREN");
+        let close_paren_result = close_pair!("RIGHT_PAREN", r"\)", "LEFT_PAREN");
+        let input_result = keyword!("INPUT", r"input\b");
+        let wire_result = keyword!("WIRE", r"wire\b");
+        let comma_result = keyword!("COMMA", r",");
+        let output_result = keyword!("OUTPUT", r"output\b");
+        let semicolon_result = keyword!("SEMICOLON", r";");
+        let end_module_result = keyword!("END_MODULE", r"endmodule\b");
+        let single_line_comment_result = single_line_comment!("SINGLE_LINE_COMMENT", r"//");
+        let comma_result2 = keyword!("COMMA", r",");
+        let whitespace_result = ignore_token!("WHITESPACE", r"\s+");
+
+        let language_result = define_language! {
+            whitespace_result,
+            single_line_comment_result,
+
+            module_result,
+            input_result,
+            output_result,
+            wire_result,
+            end_module_result,
+
+            open_paren_result,
+            close_paren_result,
+
+            comma_result,
+            semicolon_result,
+            comma_result2,
+
+            identifier_result,
+        };
+
+        assert!(language_result.is_err())
     }
-
-    pub fn get_behavior(&self) -> &TokenBehavior {
-        &self.behavior
-    }
-}
-
-pub enum TokenBehavior {
-    Ignore,
-    Keyword,
-    Pair(PairDefinition),
-    Store,
-    CommentStart(CommentEndCondition),
-}
-
-pub struct PairDefinition {
-    pair_type: PairDirection,
-    counterpart_name: String,
-}
-
-impl PairDefinition {
-    pub fn new(pair_type: PairDirection, counterpart_name: String) -> Self {
-        PairDefinition {
-            pair_type,
-            counterpart_name,
-        }
-    }
-
-    pub fn get_pair_type(&self) -> &PairDirection {
-        &self.pair_type
-    }
-
-    pub fn get_counterpart_name(&self) -> &str {
-        &self.counterpart_name
-    }
-}
-
-pub enum PairDirection {
-    Open,
-    Close,
-}
-
-pub enum CommentEndCondition {
-    Newline,
-    RegexStr(String),
-    Regex(Regex),
 }
