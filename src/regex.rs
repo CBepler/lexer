@@ -6,7 +6,7 @@ pub enum RegexPattern {
     Quantifier(Box<RegexPattern>, usize, Option<usize>),
     Not(Box<RegexPattern>), //TODO
     Group(Box<RegexPattern>),
-    Range(Vec<RangeType>),
+    Range(Vec<RangeType>), //Needs checks for if range provided is value (ex: 8-a is not valid)
     Concatenation(Vec<Box<RegexPattern>>),
     Alternation(Vec<Box<RegexPattern>>),
     StartAnchor,
@@ -20,8 +20,8 @@ pub enum RegexPattern {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RangeType {
-    Range((char, char)),
-    Char(char),
+    Multi(char, char),
+    Single(char),
 }
 
 pub struct Regex {
@@ -103,7 +103,10 @@ where
     };
     let next_op = text.peek();
     let full_atom = match next_op {
-        Some('{') => parse_quantifier(text, atom)?,
+        Some('{') => {
+            text.next();
+            parse_quantifier(text, atom)?
+        }
         Some('?') => {
             text.next();
             RegexPattern::Quantifier(Box::new(atom), 0, Some(1))
@@ -138,9 +141,6 @@ where
         Some('[') => {
             text.next();
             let range_content = parse_range(text)?;
-            let Some(']') = text.next() else {
-                return Err("Unclosed character class: Expected ']'".to_string());
-            };
             Ok(RegexPattern::Range(range_content))
         }
         Some('^') => {
@@ -227,16 +227,23 @@ where
     I: Iterator<Item = char>,
 {
     let mut num_str = String::new();
+    let digit_ender;
     loop {
         match text.peek() {
             Some('0'..='9') => {
                 num_str.push(text.next().unwrap());
             }
-            _ => break,
+            x => {
+                digit_ender = x;
+                break;
+            }
         }
     }
     if num_str.is_empty() {
-        Err("Expected digits for quantifier".to_string())
+        Err(format!(
+            "Expected digits for quantifier but instead first got: {:?}",
+            digit_ender
+        ))
     } else {
         Ok(num_str)
     }
@@ -267,20 +274,22 @@ where
             }
             Some(x) => {
                 if start_range != None {
-                    ranges.push(RangeType::Range((start_range.unwrap(), x)));
+                    ranges.push(RangeType::Multi(start_range.unwrap(), x));
                     match text.peek() {
                         Some('-') => {
-                            return Err(
-                                "Invalid start of range immediately after last range".to_string()
-                            );
+                            return Err("Invalid start of range immediately after last range (--)"
+                                .to_string());
                         }
                         Some(_) => (),
-                        None => return Err("Invalid end of range".to_string()),
+                        None => (),
                     }
                     start_range = None;
+                    last_char = Some(x);
                 } else {
-                    if let Some(char) = last_char {
-                        ranges.push(RangeType::Char(char));
+                    match text.peek() {
+                        Some('-') => (),
+                        Some(_) => ranges.push(RangeType::Single(x)),
+                        None => (),
                     }
                     last_char = Some(x);
                 }
@@ -293,42 +302,162 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{RangeType::*, RegexPattern::*, *};
+
+    fn get_reg(text: &str) -> Result<Regex, String> {
+        let reg_res = Regex::new(text);
+        match reg_res {
+            Ok(ref x) => {
+                println!("{:?}", x.get_pattern());
+            }
+            Err(ref e) => {
+                println!("{}", e);
+            }
+        };
+        reg_res
+    }
 
     #[test]
     fn regex_simple() {
-        let reg = Regex::new("abcd").unwrap();
-        let ans = RegexPattern::Concatenation(vec![
-            Box::new(RegexPattern::Literal('a')),
-            Box::new(RegexPattern::Literal('b')),
-            Box::new(RegexPattern::Literal('c')),
-            Box::new(RegexPattern::Literal('d')),
+        let reg = get_reg("abcd").unwrap();
+        let ans = Concatenation(vec![
+            Box::new(Literal('a')),
+            Box::new(Literal('b')),
+            Box::new(Literal('c')),
+            Box::new(Literal('d')),
         ]);
         assert_eq!(reg.get_pattern(), &ans);
     }
 
     #[test]
     fn regex_simple_alternation() {
-        let reg = Regex::new("a|b").unwrap();
-        let ans = RegexPattern::Alternation(vec![
-            Box::new(RegexPattern::Literal('a')),
-            Box::new(RegexPattern::Literal('b')),
-        ]);
+        let reg = get_reg("a|b").unwrap();
+        let ans = Alternation(vec![Box::new(Literal('a')), Box::new(Literal('b'))]);
         assert_eq!(reg.get_pattern(), &ans);
     }
 
     #[test]
     fn regex_simple_group() {
-        let reg = Regex::new("a(b|c)d").unwrap();
-        let ans = RegexPattern::Concatenation(vec![
-            Box::new(RegexPattern::Literal('a')),
-            Box::new(RegexPattern::Group(Box::new(RegexPattern::Alternation(
-                vec![
-                    Box::new(RegexPattern::Literal('b')),
-                    Box::new(RegexPattern::Literal('c')),
-                ],
-            )))),
-            Box::new(RegexPattern::Literal('d')),
+        let reg = get_reg("a(b|c)d").unwrap();
+        let ans = Concatenation(vec![
+            Box::new(Literal('a')),
+            Box::new(Group(Box::new(Alternation(vec![
+                Box::new(Literal('b')),
+                Box::new(Literal('c')),
+            ])))),
+            Box::new(Literal('d')),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_quantifier() {
+        let reg = get_reg("a{2,4}").unwrap();
+        let ans = Quantifier(Box::new(Literal('a')), 2, Some(4));
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_quantifier_kleene_star() {
+        let reg = get_reg("a*").unwrap();
+        let ans = Quantifier(Box::new(Literal('a')), 0, None);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_quantifier_plus() {
+        let reg = get_reg("a+").unwrap();
+        let ans = Quantifier(Box::new(Literal('a')), 1, None);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_start_anchor() {
+        let reg = get_reg("^a").unwrap();
+        let ans = Concatenation(vec![Box::new(StartAnchor), Box::new(Literal('a'))]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_end_anchor() {
+        let reg = get_reg("^a$").unwrap();
+        let ans = Concatenation(vec![
+            Box::new(StartAnchor),
+            Box::new(Literal('a')),
+            Box::new(EndAnchor),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_any_character() {
+        let reg = get_reg(".").unwrap();
+        let ans = AnyCharacter;
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_escapes() {
+        let reg = get_reg(r"\w\s\d\b").unwrap();
+        let ans = Concatenation(vec![
+            Box::new(WordCharacters),
+            Box::new(Whitespace),
+            Box::new(Digits),
+            Box::new(WordBoundry),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_range_simple() {
+        let reg = get_reg(r"[a-z]").unwrap();
+        let ans = Range(vec![Multi('a', 'z')]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_range_multiple_ranges() {
+        let reg = get_reg(r"[a-zA-Z0-9]").unwrap();
+        let ans = Range(vec![Multi('a', 'z'), Multi('A', 'Z'), Multi('0', '9')]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_range_single_value() {
+        let reg = get_reg(r"[a-zA-Z0-9_]").unwrap();
+        let ans = Range(vec![
+            Multi('a', 'z'),
+            Multi('A', 'Z'),
+            Multi('0', '9'),
+            Single('_'),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_complex_varity() {
+        let reg = get_reg(r"^[a-z]+|(01|\d.\s\w\b)$").unwrap();
+        let ans = Alternation(vec![
+            Box::new(Concatenation(vec![
+                Box::new(StartAnchor),
+                Box::new(Quantifier(Box::new(Range(vec![Multi('a', 'z')])), 1, None)),
+            ])),
+            Box::new(Concatenation(vec![
+                Box::new(Group(Box::new(Alternation(vec![
+                    Box::new(Concatenation(vec![
+                        Box::new(Literal('0')),
+                        Box::new(Literal('1')),
+                    ])),
+                    Box::new(Concatenation(vec![
+                        Box::new(Digits),
+                        Box::new(AnyCharacter),
+                        Box::new(Whitespace),
+                        Box::new(WordCharacters),
+                        Box::new(WordBoundry),
+                    ])),
+                ])))),
+                Box::new(EndAnchor),
+            ])),
         ]);
         assert_eq!(reg.get_pattern(), &ans);
     }
