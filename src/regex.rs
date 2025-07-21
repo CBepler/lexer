@@ -38,7 +38,7 @@ impl Regex {
         let mut text_iter = text.chars().into_iter().peekable();
         let pattern = parse_expression(&mut text_iter)?;
         match text_iter.next() {
-            Some(x) => Err(format!("Inalid end of grouping without start: {x}")),
+            Some(x) => Err(format!("Invalid end of grouping without start: {x}")),
             None => Ok(Regex { pattern }),
         }
     }
