@@ -1,10 +1,10 @@
 use std::iter::Peekable;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum RegexPattern {
     Literal(char),
     Quantifier(Box<RegexPattern>, usize, Option<usize>),
-    Not(Box<RegexPattern>),
+    Not(Box<RegexPattern>), //TODO
     Group(Box<RegexPattern>),
     Range(Vec<RangeType>),
     Concatenation(Vec<Box<RegexPattern>>),
@@ -18,7 +18,7 @@ pub enum RegexPattern {
     WordCharacters,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum RangeType {
     Range((char, char)),
     Char(char),
@@ -53,9 +53,7 @@ where
         }
         let next_op = text.peek();
         match next_op {
-            Some('|') => {
-                text.next();
-            }
+            Some('|') => (),
             Some(')') | None => break,
             Some(_) => break,
         }
@@ -298,9 +296,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn simple() {
+    fn regex_simple() {
         let reg = Regex::new("abcd").unwrap();
-        println!("{:?}", reg.get_pattern());
-        assert!(false);
+        let ans = RegexPattern::Concatenation(vec![
+            Box::new(RegexPattern::Literal('a')),
+            Box::new(RegexPattern::Literal('b')),
+            Box::new(RegexPattern::Literal('c')),
+            Box::new(RegexPattern::Literal('d')),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_simple_alternation() {
+        let reg = Regex::new("a|b").unwrap();
+        let ans = RegexPattern::Alternation(vec![
+            Box::new(RegexPattern::Literal('a')),
+            Box::new(RegexPattern::Literal('b')),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_simple_group() {
+        let reg = Regex::new("a(b|c)d").unwrap();
+        let ans = RegexPattern::Concatenation(vec![
+            Box::new(RegexPattern::Literal('a')),
+            Box::new(RegexPattern::Group(Box::new(RegexPattern::Alternation(
+                vec![
+                    Box::new(RegexPattern::Literal('b')),
+                    Box::new(RegexPattern::Literal('c')),
+                ],
+            )))),
+            Box::new(RegexPattern::Literal('d')),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
     }
 }
