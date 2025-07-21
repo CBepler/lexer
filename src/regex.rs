@@ -4,24 +4,29 @@ use std::iter::Peekable;
 pub enum RegexPattern {
     Literal(char),
     Quantifier(Box<RegexPattern>, usize, Option<usize>),
-    Not(Box<RegexPattern>), //TODO
+    NotRange(Vec<RangeType>),
     Group(Box<RegexPattern>),
-    Range(Vec<RangeType>), //Needs checks for if range provided is value (ex: 8-a is not valid)
+    Range(Vec<RangeType>),
     Concatenation(Vec<Box<RegexPattern>>),
     Alternation(Vec<Box<RegexPattern>>),
     StartAnchor,
     EndAnchor,
-    WordBoundry,
     AnyCharacter,
-    Digits,
-    Whitespace,
-    WordCharacters,
+    EscapeChar(EscapeChar),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RangeType {
     Multi(char, char),
-    Single(char),
+    Single(RegexPattern),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EscapeChar {
+    WordBoundry,
+    Digit,
+    Whitespace,
+    WordCharacter,
 }
 
 pub struct Regex {
@@ -32,7 +37,10 @@ impl Regex {
     pub fn new(text: &str) -> Result<Self, String> {
         let mut text_iter = text.chars().into_iter().peekable();
         let pattern = parse_expression(&mut text_iter)?;
-        Ok(Regex { pattern })
+        match text_iter.next() {
+            Some(x) => Err(format!("Inalid end of grouping without start: {x}")),
+            None => Ok(Regex { pattern }),
+        }
     }
 
     pub fn get_pattern(&self) -> &RegexPattern {
@@ -45,6 +53,10 @@ where
     I: Iterator<Item = char>,
 {
     let mut terms = Vec::new();
+    match text.peek() {
+        Some(_) => (),
+        None => return Err("Unexpected end of regex after start of expression".to_string()),
+    }
     loop {
         let term_res = parse_term(text);
         match term_res {
@@ -60,7 +72,7 @@ where
         text.next();
     }
     if terms.is_empty() {
-        return Err("Empty expression found, or unexpected end of input".to_string());
+        return Err("Unexpected end of input".to_string());
     }
     if terms.len() == 1 {
         Ok(*terms.pop().unwrap())
@@ -74,6 +86,13 @@ where
     I: Iterator<Item = char>,
 {
     let mut factors = Vec::new();
+    match text.peek() {
+        Some('^') => {
+            factors.push(Box::new(RegexPattern::StartAnchor));
+            text.next();
+        }
+        Some(_) | None => (),
+    }
     loop {
         let next_op = text.peek();
         match next_op {
@@ -85,6 +104,9 @@ where
             Ok(factor) => factors.push(Box::new(factor)),
             Err(e) => return Err(e),
         }
+    }
+    if factors.len() == 0 {
+        return Err("Unexpected empty factor".to_string());
     }
     if factors.len() == 1 {
         return Ok(*factors[0].clone());
@@ -140,16 +162,15 @@ where
         }
         Some('[') => {
             text.next();
-            let range_content = parse_range(text)?;
-            Ok(RegexPattern::Range(range_content))
-        }
-        Some('^') => {
-            text.next();
-            Ok(RegexPattern::StartAnchor)
+            let range = construct_range(text)?;
+            Ok(range)
         }
         Some('$') => {
             text.next();
-            Ok(RegexPattern::EndAnchor)
+            match text.peek() {
+                Some(')') | Some('|') | None => Ok(RegexPattern::EndAnchor),
+                Some(x) => Err(format!("Invalid end anchor before: {x}")),
+            }
         }
         Some('.') => {
             text.next();
@@ -157,22 +178,7 @@ where
         }
         Some('\\') => {
             text.next();
-            let escaped_char = text
-                .next()
-                .ok_or_else(|| "Nothing followed \\".to_string())?;
-            match escaped_char {
-                'b' => Ok(RegexPattern::WordBoundry),
-                'd' => Ok(RegexPattern::Digits),
-                's' => Ok(RegexPattern::Whitespace),
-                'w' => Ok(RegexPattern::WordCharacters),
-                'n' => Ok(RegexPattern::Literal('\n')),
-                '*' | '?' | '\\' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '.' => {
-                    Ok(RegexPattern::Literal(escaped_char))
-                }
-                '\'' => Ok(RegexPattern::Literal('\'')),
-                '"' => Ok(RegexPattern::Literal('"')),
-                x => Err(format!("Invalid escape sequence: \\{x}")),
-            }
+            parse_escape(text)
         }
         Some(c) if !".*+?()[]{}|^$\\".contains(*c) => {
             let ch = c.clone();
@@ -181,6 +187,28 @@ where
         }
         Some(c) => Err(format!("Unexpected character: '{c}'")),
         None => Err("Unexpected end of input while parsing atom".to_string()),
+    }
+}
+
+fn parse_escape<I>(text: &mut Peekable<I>) -> Result<RegexPattern, String>
+where
+    I: Iterator<Item = char>,
+{
+    let escaped_char = text
+        .next()
+        .ok_or_else(|| "Nothing followed \\".to_string())?;
+    match escaped_char {
+        'b' => Ok(RegexPattern::EscapeChar(EscapeChar::WordBoundry)),
+        'd' => Ok(RegexPattern::EscapeChar(EscapeChar::Digit)),
+        's' => Ok(RegexPattern::EscapeChar(EscapeChar::Whitespace)),
+        'w' => Ok(RegexPattern::EscapeChar(EscapeChar::WordCharacter)),
+        'n' => Ok(RegexPattern::Literal('\n')),
+        '*' | '?' | '\\' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '.' => {
+            Ok(RegexPattern::Literal(escaped_char))
+        }
+        '\'' => Ok(RegexPattern::Literal('\'')),
+        '"' => Ok(RegexPattern::Literal('"')),
+        x => Err(format!("Invalid escape sequence: \\{x}")),
     }
 }
 
@@ -249,6 +277,23 @@ where
     }
 }
 
+fn construct_range<I>(text: &mut Peekable<I>) -> Result<RegexPattern, String>
+where
+    I: Iterator<Item = char>,
+{
+    match text.peek() {
+        Some('^') => {
+            text.next();
+            let range = parse_range(text)?;
+            Ok(RegexPattern::NotRange(range))
+        }
+        Some(_) | None => {
+            let range = parse_range(text)?;
+            Ok(RegexPattern::Range(range))
+        }
+    }
+}
+
 fn parse_range<I>(text: &mut Peekable<I>) -> Result<Vec<RangeType>, String>
 where
     I: Iterator<Item = char>,
@@ -269,29 +314,36 @@ where
                 if start_range != None {
                     return Err("Invalid --".to_string());
                 }
-                start_range = last_char;
-                continue;
+                if last_char == None {
+                    ranges.push(RangeType::Single(RegexPattern::Literal('-')))
+                } else {
+                    start_range = last_char;
+                }
+            }
+            Some('\\') => {
+                if start_range != None {
+                    start_range = None;
+                    ranges.push(RangeType::Single(RegexPattern::Literal(last_char.unwrap())));
+                    ranges.push(RangeType::Single(RegexPattern::Literal('-')));
+                }
+                let escape = parse_escape(text)?;
+                ranges.push(RangeType::Single(escape));
+                last_char = None;
             }
             Some(x) => {
                 if start_range != None {
-                    ranges.push(RangeType::Multi(start_range.unwrap(), x));
-                    match text.peek() {
-                        Some('-') => {
-                            return Err("Invalid start of range immediately after last range (--)"
-                                .to_string());
-                        }
-                        Some(_) => (),
-                        None => (),
+                    let start = start_range.unwrap();
+                    if (start as u32) < (x as u32) {
+                        ranges.push(RangeType::Multi(start_range.unwrap(), x));
+                        last_char = None;
+                    } else {
+                        ranges.push(RangeType::Single(RegexPattern::Literal(start)));
+                        ranges.push(RangeType::Single(RegexPattern::Literal('-')));
+                        last_char = check_single(text, &mut ranges, x);
                     }
                     start_range = None;
-                    last_char = Some(x);
                 } else {
-                    match text.peek() {
-                        Some('-') => (),
-                        Some(_) => ranges.push(RangeType::Single(x)),
-                        None => (),
-                    }
-                    last_char = Some(x);
+                    last_char = check_single(text, &mut ranges, x);
                 }
             }
             None => return Err("Invalid end of range".to_string()),
@@ -300,9 +352,27 @@ where
     Ok(ranges)
 }
 
+fn check_single<I>(
+    text: &mut Peekable<I>,
+    ranges: &mut Vec<RangeType>,
+    current: char,
+) -> Option<char>
+where
+    I: Iterator<Item = char>,
+{
+    match text.peek() {
+        Some('-') => Some(current),
+        Some(_) => {
+            ranges.push(RangeType::Single(RegexPattern::Literal(current)));
+            None
+        }
+        None => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RangeType::*, RegexPattern::*, *};
+    use super::{EscapeChar::*, RangeType::*, RegexPattern::*, *};
 
     fn get_reg(text: &str) -> Result<Regex, String> {
         let reg_res = Regex::new(text);
@@ -372,6 +442,13 @@ mod tests {
     }
 
     #[test]
+    fn regex_quantifier_no_second_is_none() {
+        let reg = get_reg("a{0,}").unwrap();
+        let ans = Quantifier(Box::new(Literal('a')), 0, None);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
     fn regex_start_anchor() {
         let reg = get_reg("^a").unwrap();
         let ans = Concatenation(vec![Box::new(StartAnchor), Box::new(Literal('a'))]);
@@ -400,10 +477,10 @@ mod tests {
     fn regex_escapes() {
         let reg = get_reg(r"\w\s\d\b").unwrap();
         let ans = Concatenation(vec![
-            Box::new(WordCharacters),
-            Box::new(Whitespace),
-            Box::new(Digits),
-            Box::new(WordBoundry),
+            Box::new(EscapeChar(WordCharacter)),
+            Box::new(EscapeChar(Whitespace)),
+            Box::new(EscapeChar(Digit)),
+            Box::new(EscapeChar(WordBoundry)),
         ]);
         assert_eq!(reg.get_pattern(), &ans);
     }
@@ -429,7 +506,47 @@ mod tests {
             Multi('a', 'z'),
             Multi('A', 'Z'),
             Multi('0', '9'),
-            Single('_'),
+            Single(Literal('_')),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_range_following_hypen() {
+        let reg = get_reg(r"[a-d-z_]").unwrap();
+        let ans = Range(vec![
+            Multi('a', 'd'),
+            Single(Literal('-')),
+            Single(Literal('z')),
+            Single(Literal('_')),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_range_escape_characters() {
+        let reg = get_reg(r"[\b\s\w\da0-9]").unwrap();
+        let ans = Range(vec![
+            Single(EscapeChar(WordBoundry)),
+            Single(EscapeChar(Whitespace)),
+            Single(EscapeChar(WordCharacter)),
+            Single(EscapeChar(Digit)),
+            Single(Literal('a')),
+            Multi('0', '9'),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_range_backwards_to_single() {
+        let reg = get_reg(r"[a-\sz-a]").unwrap();
+        let ans = Range(vec![
+            Single(Literal('a')),
+            Single(Literal('-')),
+            Single(EscapeChar(Whitespace)),
+            Single(Literal('z')),
+            Single(Literal('-')),
+            Single(Literal('a')),
         ]);
         assert_eq!(reg.get_pattern(), &ans);
     }
@@ -449,16 +566,211 @@ mod tests {
                         Box::new(Literal('1')),
                     ])),
                     Box::new(Concatenation(vec![
-                        Box::new(Digits),
+                        Box::new(EscapeChar(Digit)),
                         Box::new(AnyCharacter),
-                        Box::new(Whitespace),
-                        Box::new(WordCharacters),
-                        Box::new(WordBoundry),
+                        Box::new(EscapeChar(Whitespace)),
+                        Box::new(EscapeChar(WordCharacter)),
+                        Box::new(EscapeChar(WordBoundry)),
                     ])),
                 ])))),
                 Box::new(EndAnchor),
             ])),
         ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_not_range() {
+        let reg = get_reg(r"[^a0-9]").unwrap();
+        let ans = NotRange(vec![Single(Literal('a')), Multi('0', '9')]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_anchors_complex() {
+        let reg = get_reg(r"^a|^bcd$|^f(^gh$)*$").unwrap();
+        let ans = Alternation(vec![
+            Box::new(Concatenation(vec![
+                Box::new(StartAnchor),
+                Box::new(Literal('a')),
+            ])),
+            Box::new(Concatenation(vec![
+                Box::new(StartAnchor),
+                Box::new(Literal('b')),
+                Box::new(Literal('c')),
+                Box::new(Literal('d')),
+                Box::new(EndAnchor),
+            ])),
+            Box::new(Concatenation(vec![
+                Box::new(StartAnchor),
+                Box::new(Literal('f')),
+                Box::new(Quantifier(
+                    Box::new(Group(Box::new(Concatenation(vec![
+                        Box::new(StartAnchor),
+                        Box::new(Literal('g')),
+                        Box::new(Literal('h')),
+                        Box::new(EndAnchor),
+                    ])))),
+                    0,
+                    None,
+                )),
+                Box::new(EndAnchor),
+            ])),
+        ]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_invalid_start_anchor() {
+        let reg = get_reg(r"a^b");
+        assert!(reg.is_err());
+    }
+
+    #[test]
+    fn regex_invalid_end_anchor() {
+        let reg = get_reg(r"a$b");
+        assert!(reg.is_err());
+    }
+
+    #[test]
+    fn regex_unclosed_group() {
+        assert!(get_reg("(a|b").is_err());
+        assert!(get_reg("a(b").is_err());
+        assert!(get_reg("((a)").is_err());
+        assert!(get_reg("(a|").is_err());
+    }
+
+    #[test]
+    fn regex_unopened_group() {
+        assert!(get_reg("a)b").is_err());
+        assert!(get_reg("a)").is_err());
+    }
+
+    #[test]
+    fn regex_empty_expression() {
+        assert!(get_reg("").is_err());
+        assert!(get_reg("()").is_err());
+        assert!(get_reg("a|").is_err());
+        assert!(get_reg("|a").is_err());
+        assert!(get_reg("||").is_err());
+    }
+
+    #[test]
+    fn regex_quantifier_no_atom() {
+        assert!(get_reg("*a").is_err());
+        assert!(get_reg("+b").is_err());
+        assert!(get_reg("?c").is_err());
+        assert!(get_reg("{1}d").is_err());
+        assert!(get_reg("a|*b").is_err());
+        assert_eq!(
+            get_reg("(a*)?").unwrap().get_pattern(),
+            &Quantifier(
+                Box::new(Group(Box::new(Quantifier(Box::new(Literal('a')), 0, None)))),
+                0,
+                Some(1)
+            )
+        );
+    }
+
+    #[test]
+    fn regex_quantifier_invalid_syntax() {
+        assert!(get_reg("a{").is_err());
+        assert!(get_reg("a{1").is_err());
+        assert!(get_reg("a{1,").is_err());
+        assert!(get_reg("a{,1}").is_err());
+        assert!(get_reg("a{1, }").is_err());
+        assert!(get_reg("a{foo}").is_err());
+        assert!(get_reg("a{1,2,3}").is_err());
+        assert!(get_reg("a{").is_err());
+    }
+
+    #[test]
+    fn regex_invalid_escape_sequences() {
+        assert!(get_reg(r"\z").is_err());
+        assert!(
+            get_reg(r"\\z").unwrap().get_pattern()
+                == &Concatenation(vec![Box::new(Literal('\\')), Box::new(Literal('z'))])
+        );
+        assert!(get_reg(r"\").is_err());
+        assert!(get_reg(r"a\").is_err());
+    }
+
+    #[test]
+    fn regex_range_unclosed() {
+        assert!(get_reg("[a").is_err());
+        assert!(get_reg("[a-").is_err());
+        assert!(get_reg("[a-z").is_err());
+        assert!(get_reg("[^a").is_err());
+        assert!(get_reg("[\\").is_err());
+    }
+
+    #[test]
+    fn regex_range_invalid_hyphen_placement() {
+        let reg = get_reg(r"[a-z-]").unwrap();
+        assert_eq!(
+            reg.get_pattern(),
+            &Range(vec![Multi('a', 'z'), Single(Literal('-'))])
+        );
+        let reg = get_reg(r"[-a-z]").unwrap();
+        assert_eq!(
+            reg.get_pattern(),
+            &Range(vec![Single(Literal('-')), Multi('a', 'z')])
+        );
+        assert!(get_reg(r"[a--z]").is_err());
+    }
+
+    #[test]
+    fn regex_range_escaped_metacharacters() {
+        let reg = get_reg(r"[\[-\]]").unwrap();
+        assert_eq!(
+            reg.get_pattern(),
+            &Range(vec![
+                Single(Literal('[')),
+                Single(Literal('-')),
+                Single(Literal(']'))
+            ])
+        );
+        let reg = get_reg(r"[^\w]").unwrap();
+        assert_eq!(
+            reg.get_pattern(),
+            &NotRange(vec![Single(EscapeChar(WordCharacter))])
+        );
+    }
+
+    #[test]
+    fn regex_invalid_metacharacter_as_literal() {
+        assert!(get_reg("+").is_err());
+        assert!(get_reg("*").is_err());
+        assert!(get_reg("?").is_err());
+        assert!(get_reg("{").is_err());
+        assert!(get_reg("}").is_err());
+    }
+
+    #[test]
+    fn regex_empty_string() {
+        assert!(get_reg("").is_err());
+    }
+
+    #[test]
+    fn regex_just_anchors() {
+        assert!(get_reg("^").unwrap().get_pattern() == &StartAnchor);
+        assert!(get_reg("$").unwrap().get_pattern() == &EndAnchor);
+        assert!(
+            get_reg("^$").unwrap().get_pattern()
+                == &Concatenation(vec![Box::new(StartAnchor), Box::new(EndAnchor)])
+        );
+    }
+
+    #[test]
+    fn regex_dollar_inside_group() {
+        let reg = get_reg(r"(a$|b)").unwrap();
+        let ans = Group(Box::new(Alternation(vec![
+            Box::new(Concatenation(vec![
+                Box::new(Literal('a')),
+                Box::new(EndAnchor),
+            ])),
+            Box::new(Literal('b')),
+        ])));
         assert_eq!(reg.get_pattern(), &ans);
     }
 }
