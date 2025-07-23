@@ -1,7 +1,11 @@
+use escapes::EscapeChar;
 use std::iter::Peekable;
+
+pub mod escapes;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RegexPattern {
+    // \b is not valid in a range and needs to be removed
     Literal(char),
     Quantifier(Box<RegexPattern>, usize, Option<usize>),
     NotRange(Vec<RangeType>),
@@ -15,18 +19,11 @@ pub enum RegexPattern {
     EscapeChar(EscapeChar),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RangeType {
-    Multi(char, char),
-    Single(RegexPattern),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum EscapeChar {
-    WordBoundry,
-    Digit,
-    Whitespace,
-    WordCharacter,
+    SingleChar(char),
+    MultiChar(char, char),
+    SingleEscape(EscapeChar),
 }
 
 pub struct Regex {
@@ -315,7 +312,7 @@ where
                     return Err("Invalid --".to_string());
                 }
                 if last_char == None {
-                    ranges.push(RangeType::Single(RegexPattern::Literal('-')))
+                    ranges.push(RangeType::SingleChar('-'))
                 } else {
                     start_range = last_char;
                 }
@@ -323,22 +320,26 @@ where
             Some('\\') => {
                 if start_range != None {
                     start_range = None;
-                    ranges.push(RangeType::Single(RegexPattern::Literal(last_char.unwrap())));
-                    ranges.push(RangeType::Single(RegexPattern::Literal('-')));
+                    ranges.push(RangeType::SingleChar(last_char.unwrap()));
+                    ranges.push(RangeType::SingleChar('-'));
                 }
                 let escape = parse_escape(text)?;
-                ranges.push(RangeType::Single(escape));
+                match escape {
+                    RegexPattern::Literal(x) => ranges.push(RangeType::SingleChar(x)),
+                    RegexPattern::EscapeChar(x) => ranges.push(RangeType::SingleEscape(x)),
+                    _ => return Err(format!("Invalid return from parse_escape {:?}", escape)),
+                }
                 last_char = None;
             }
             Some(x) => {
                 if start_range != None {
                     let start = start_range.unwrap();
                     if (start as u32) < (x as u32) {
-                        ranges.push(RangeType::Multi(start_range.unwrap(), x));
+                        ranges.push(RangeType::MultiChar(start_range.unwrap(), x));
                         last_char = None;
                     } else {
-                        ranges.push(RangeType::Single(RegexPattern::Literal(start)));
-                        ranges.push(RangeType::Single(RegexPattern::Literal('-')));
+                        ranges.push(RangeType::SingleChar(start));
+                        ranges.push(RangeType::SingleChar('-'));
                         last_char = check_single(text, &mut ranges, x);
                     }
                     start_range = None;
@@ -363,7 +364,7 @@ where
     match text.peek() {
         Some('-') => Some(current),
         Some(_) => {
-            ranges.push(RangeType::Single(RegexPattern::Literal(current)));
+            ranges.push(RangeType::SingleChar(current));
             None
         }
         None => None,
@@ -488,14 +489,18 @@ mod tests {
     #[test]
     fn regex_range_simple() {
         let reg = get_reg(r"[a-z]").unwrap();
-        let ans = Range(vec![Multi('a', 'z')]);
+        let ans = Range(vec![MultiChar('a', 'z')]);
         assert_eq!(reg.get_pattern(), &ans);
     }
 
     #[test]
     fn regex_range_multiple_ranges() {
         let reg = get_reg(r"[a-zA-Z0-9]").unwrap();
-        let ans = Range(vec![Multi('a', 'z'), Multi('A', 'Z'), Multi('0', '9')]);
+        let ans = Range(vec![
+            MultiChar('a', 'z'),
+            MultiChar('A', 'Z'),
+            MultiChar('0', '9'),
+        ]);
         assert_eq!(reg.get_pattern(), &ans);
     }
 
@@ -503,10 +508,10 @@ mod tests {
     fn regex_range_single_value() {
         let reg = get_reg(r"[a-zA-Z0-9_]").unwrap();
         let ans = Range(vec![
-            Multi('a', 'z'),
-            Multi('A', 'Z'),
-            Multi('0', '9'),
-            Single(Literal('_')),
+            MultiChar('a', 'z'),
+            MultiChar('A', 'Z'),
+            MultiChar('0', '9'),
+            SingleChar('_'),
         ]);
         assert_eq!(reg.get_pattern(), &ans);
     }
@@ -515,10 +520,10 @@ mod tests {
     fn regex_range_following_hypen() {
         let reg = get_reg(r"[a-d-z_]").unwrap();
         let ans = Range(vec![
-            Multi('a', 'd'),
-            Single(Literal('-')),
-            Single(Literal('z')),
-            Single(Literal('_')),
+            MultiChar('a', 'd'),
+            SingleChar('-'),
+            SingleChar('z'),
+            SingleChar('_'),
         ]);
         assert_eq!(reg.get_pattern(), &ans);
     }
@@ -527,12 +532,12 @@ mod tests {
     fn regex_range_escape_characters() {
         let reg = get_reg(r"[\b\s\w\da0-9]").unwrap();
         let ans = Range(vec![
-            Single(EscapeChar(WordBoundry)),
-            Single(EscapeChar(Whitespace)),
-            Single(EscapeChar(WordCharacter)),
-            Single(EscapeChar(Digit)),
-            Single(Literal('a')),
-            Multi('0', '9'),
+            SingleEscape(WordBoundry),
+            SingleEscape(Whitespace),
+            SingleEscape(WordCharacter),
+            SingleEscape(Digit),
+            SingleChar('a'),
+            MultiChar('0', '9'),
         ]);
         assert_eq!(reg.get_pattern(), &ans);
     }
@@ -541,12 +546,12 @@ mod tests {
     fn regex_range_backwards_to_single() {
         let reg = get_reg(r"[a-\sz-a]").unwrap();
         let ans = Range(vec![
-            Single(Literal('a')),
-            Single(Literal('-')),
-            Single(EscapeChar(Whitespace)),
-            Single(Literal('z')),
-            Single(Literal('-')),
-            Single(Literal('a')),
+            SingleChar('a'),
+            SingleChar('-'),
+            SingleEscape(Whitespace),
+            SingleChar('z'),
+            SingleChar('-'),
+            SingleChar('a'),
         ]);
         assert_eq!(reg.get_pattern(), &ans);
     }
@@ -557,7 +562,11 @@ mod tests {
         let ans = Alternation(vec![
             Box::new(Concatenation(vec![
                 Box::new(StartAnchor),
-                Box::new(Quantifier(Box::new(Range(vec![Multi('a', 'z')])), 1, None)),
+                Box::new(Quantifier(
+                    Box::new(Range(vec![MultiChar('a', 'z')])),
+                    1,
+                    None,
+                )),
             ])),
             Box::new(Concatenation(vec![
                 Box::new(Group(Box::new(Alternation(vec![
@@ -582,7 +591,7 @@ mod tests {
     #[test]
     fn regex_not_range() {
         let reg = get_reg(r"[^a0-9]").unwrap();
-        let ans = NotRange(vec![Single(Literal('a')), Multi('0', '9')]);
+        let ans = NotRange(vec![SingleChar('a'), MultiChar('0', '9')]);
         assert_eq!(reg.get_pattern(), &ans);
     }
 
@@ -709,12 +718,12 @@ mod tests {
         let reg = get_reg(r"[a-z-]").unwrap();
         assert_eq!(
             reg.get_pattern(),
-            &Range(vec![Multi('a', 'z'), Single(Literal('-'))])
+            &Range(vec![MultiChar('a', 'z'), SingleChar('-')])
         );
         let reg = get_reg(r"[-a-z]").unwrap();
         assert_eq!(
             reg.get_pattern(),
-            &Range(vec![Single(Literal('-')), Multi('a', 'z')])
+            &Range(vec![SingleChar('-'), MultiChar('a', 'z')])
         );
         assert!(get_reg(r"[a--z]").is_err());
     }
@@ -724,16 +733,12 @@ mod tests {
         let reg = get_reg(r"[\[-\]]").unwrap();
         assert_eq!(
             reg.get_pattern(),
-            &Range(vec![
-                Single(Literal('[')),
-                Single(Literal('-')),
-                Single(Literal(']'))
-            ])
+            &Range(vec![SingleChar('['), SingleChar('-'), SingleChar(']')])
         );
         let reg = get_reg(r"[^\w]").unwrap();
         assert_eq!(
             reg.get_pattern(),
-            &NotRange(vec![Single(EscapeChar(WordCharacter))])
+            &NotRange(vec![SingleEscape(WordCharacter)])
         );
     }
 
