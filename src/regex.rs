@@ -5,7 +5,6 @@ pub mod escapes;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RegexPattern {
-    // \b is not valid in a range and needs to be removed
     Literal(char),
     Quantifier(Box<RegexPattern>, usize, Option<usize>),
     NotRange(Vec<RangeType>),
@@ -326,7 +325,14 @@ where
                 let escape = parse_escape(text)?;
                 match escape {
                     RegexPattern::Literal(x) => ranges.push(RangeType::SingleChar(x)),
-                    RegexPattern::EscapeChar(x) => ranges.push(RangeType::SingleEscape(x)),
+                    RegexPattern::EscapeChar(x) => {
+                        if x == EscapeChar::WordBoundry {
+                            return Err(
+                                "Word Boundry escape character is not allowed in range".to_string()
+                            );
+                        }
+                        ranges.push(RangeType::SingleEscape(x));
+                    }
                     _ => return Err(format!("Invalid return from parse_escape {:?}", escape)),
                 }
                 last_char = None;
@@ -530,9 +536,8 @@ mod tests {
 
     #[test]
     fn regex_range_escape_characters() {
-        let reg = get_reg(r"[\b\s\w\da0-9]").unwrap();
+        let reg = get_reg(r"[\s\w\da0-9]").unwrap();
         let ans = Range(vec![
-            SingleEscape(WordBoundry),
             SingleEscape(Whitespace),
             SingleEscape(WordCharacter),
             SingleEscape(Digit),
@@ -540,6 +545,12 @@ mod tests {
             MultiChar('0', '9'),
         ]);
         assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_range_word_bounry_errors() {
+        let reg = get_reg(r"[\b]");
+        assert!(reg.is_err());
     }
 
     #[test]
