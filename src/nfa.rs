@@ -4,7 +4,7 @@ use crate::regex::{RangeType, Regex, RegexPattern, escapes::EscapeChar};
 
 type StateId = usize;
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 enum TransitionLabel {
     Char(char),
     Any,
@@ -15,13 +15,13 @@ enum TransitionLabel {
     CharSet(CharSetType),
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub enum CharSetType {
     Positive(Vec<RangeType>),
     Negative(Vec<RangeType>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 struct NFAFragment {
     start_state: StateId,
     accept_state: StateId,
@@ -45,6 +45,7 @@ impl NFAFragment {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct LexerNFA {
     start_state: StateId,
     transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>>,
@@ -285,7 +286,10 @@ impl<'a> NFAFragmentCompiler<'a> {
     fn parse_quantifier(&mut self, pattern: &RegexPattern) -> Result<NFAFragment, String> {
         if let RegexPattern::Quantifier(pattern, min, max_op) = pattern {
             let min_pattern = RegexPattern::Concatenation(vec![pattern.clone(); *min]);
-            let min_nfa = self.parse_concatenation(&min_pattern)?;
+            let mut min_nfa = None;
+            if *min > 0 {
+                min_nfa = Some(self.parse_concatenation(&min_pattern)?);
+            }
             let mut max_nfa;
             if let Some(max) = max_op {
                 let diff = max - min;
@@ -304,7 +308,10 @@ impl<'a> NFAFragmentCompiler<'a> {
                     max_nfa.start_state,
                 );
             }
-            self.concatenate_nfas(vec![min_nfa, max_nfa])
+            if let Some(min_nfa) = min_nfa {
+                return self.concatenate_nfas(vec![min_nfa, max_nfa]);
+            }
+            Ok(max_nfa)
         } else {
             return Err(format!(
                 "Invalid Regex passed to parse_quantifier {:?}",
@@ -314,24 +321,13 @@ impl<'a> NFAFragmentCompiler<'a> {
     }
 
     fn parse_optional(&mut self, pattern: &RegexPattern) -> Result<NFAFragment, String> {
-        let mut frag = self.create_frag();
-        let inner_nfa = self.compile_regex_pattern(pattern)?;
-        frag.add_transition(
-            frag.start_state,
-            TransitionLabel::Epsilon,
+        let mut inner_nfa = self.compile_regex_pattern(pattern)?;
+        inner_nfa.add_transition(
             inner_nfa.start_state,
-        );
-        frag.add_transition(
-            frag.start_state,
             TransitionLabel::Epsilon,
             inner_nfa.accept_state,
         );
-        frag.add_transition(
-            inner_nfa.accept_state,
-            TransitionLabel::Epsilon,
-            frag.accept_state,
-        );
-        Ok(frag)
+        Ok(inner_nfa)
     }
 
     fn parse_group(&mut self, pattern: &RegexPattern) -> Result<NFAFragment, String> {
@@ -374,5 +370,797 @@ impl<'a> NFAFragmentCompiler<'a> {
             ));
         };
         Ok(frag)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::vec;
+
+    use super::*;
+
+    #[test]
+    fn lexor_nfa_single_simple_concat() {
+        let text = r"ab";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("AB_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1)); // 1 is start of 'a' NFA
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 2));
+
+        expected_transitions
+            .entry(2)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('b'), 4));
+
+        expected_accept_states.insert(4, "AB_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 5,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_single_literal() {
+        let text = r"x";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("X_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('x'), 2));
+        expected_accept_states.insert(2, "X_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 3,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_any() {
+        let text = r".";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("ANY_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Any, 2));
+        expected_accept_states.insert(2, "ANY_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 3,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_alternation() {
+        let text = r"a|b";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("OR_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 5));
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 4));
+
+        expected_transitions
+            .entry(5)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('b'), 6));
+
+        expected_transitions
+            .entry(4)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 2));
+
+        expected_transitions
+            .entry(6)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 2));
+
+        expected_accept_states.insert(2, "OR_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 7,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_range() {
+        let text = r"[a-c]";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("RANGE_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        let ranges = vec![RangeType::MultiChar('a', 'c')];
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::CharSet(CharSetType::Positive(ranges)), 2));
+
+        expected_accept_states.insert(2, "RANGE_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 3,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_not_range() {
+        let text = r"[^a-c]";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("NOT_RANGE_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        let ranges = vec![RangeType::MultiChar('a', 'c')];
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::CharSet(CharSetType::Negative(ranges)), 2));
+
+        expected_accept_states.insert(2, "NOT_RANGE_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 3,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_kleene_star() {
+        let text = r"a*";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("STAR_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 2));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 2));
+
+        expected_transitions
+            .entry(2)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_accept_states.insert(2, "STAR_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 3,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_kleene_plus() {
+        let text = r"a+";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("PLUS_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 2));
+
+        expected_transitions
+            .entry(2)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 4));
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 4));
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 4));
+
+        expected_transitions
+            .entry(4)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+
+        expected_accept_states.insert(4, "PLUS_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 5,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_optional() {
+        let text = r"a?";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("OPTIONAL_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 2));
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 2));
+
+        expected_accept_states.insert(2, "OPTIONAL_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 3,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_group() {
+        let text = r"(a)";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("GROUP_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 2));
+        expected_accept_states.insert(2, "GROUP_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 3,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_multiple_patterns() {
+        let regex_a = Regex::new(r"a").unwrap();
+        let regex_b = Regex::new(r"b").unwrap();
+        let nfa = LexerNFA::new(vec![
+            ("TOKEN_A".to_string(), regex_a),
+            ("TOKEN_B".to_string(), regex_b),
+        ])
+        .unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 2));
+        expected_accept_states.insert(2, "TOKEN_A".to_string());
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('b'), 4));
+        expected_accept_states.insert(4, "TOKEN_B".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 5,
+        };
+
+        assert_eq!(nfa, expected_nfa,);
+    }
+
+    #[test]
+    fn lexor_nfa_start_anchor() {
+        let text = r"^a";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("START_ANCHOR_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::StartAnchorAssertion, 2));
+
+        expected_transitions
+            .entry(2)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 4));
+
+        expected_accept_states.insert(4, "START_ANCHOR_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 5,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_end_anchor() {
+        let text = r"a$";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("END_ANCHOR_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 2));
+
+        expected_transitions
+            .entry(2)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::EndAnchorAssertion, 4));
+
+        expected_accept_states.insert(4, "END_ANCHOR_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 5,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_full_line_match() {
+        let text = r"^a$";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("FULL_LINE_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::StartAnchorAssertion, 2));
+
+        expected_transitions
+            .entry(2)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 4));
+
+        expected_transitions
+            .entry(4)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 5));
+
+        expected_transitions
+            .entry(5)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::EndAnchorAssertion, 6));
+
+        expected_accept_states.insert(6, "FULL_LINE_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 7,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_escape_digit() {
+        let text = r"\d";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("DIGIT_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Escape(EscapeChar::Digit), 2));
+
+        expected_accept_states.insert(2, "DIGIT_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 3,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_general_quantifier() {
+        let text = r"a{1,2}";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("QUANTIFIER_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 2));
+
+        expected_transitions
+            .entry(2)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 4));
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Char('a'), 4));
+
+        expected_accept_states.insert(4, "QUANTIFIER_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 5,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexor_nfa_complex_pattern() {
+        let text = r"^(\d|[a-f])+\s?$";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("COMPLEX_TOKEN".to_string(), regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, String> = HashMap::new();
+
+        let hex_ranges = vec![RangeType::MultiChar('a', 'f')];
+
+        expected_transitions
+            .entry(0)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 1));
+
+        expected_transitions
+            .entry(1)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::StartAnchorAssertion, 2));
+
+        expected_transitions
+            .entry(2)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 3));
+
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 5));
+        expected_transitions
+            .entry(3)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 7));
+
+        expected_transitions
+            .entry(5)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Escape(EscapeChar::Digit), 6));
+
+        expected_transitions
+            .entry(7)
+            .or_insert_with(HashSet::new)
+            .insert((
+                TransitionLabel::CharSet(CharSetType::Positive(hex_ranges.clone())),
+                8,
+            ));
+
+        expected_transitions
+            .entry(6)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 4));
+
+        expected_transitions
+            .entry(8)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 4));
+
+        expected_transitions
+            .entry(4)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 9));
+
+        expected_transitions
+            .entry(9)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 11));
+        expected_transitions
+            .entry(9)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 10));
+        expected_transitions
+            .entry(9)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 13));
+
+        expected_transitions
+            .entry(10)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 9));
+        expected_transitions
+            .entry(10)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 15));
+
+        expected_transitions
+            .entry(11)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Escape(EscapeChar::Digit), 12));
+
+        expected_transitions
+            .entry(12)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 10));
+
+        expected_transitions
+            .entry(13)
+            .or_insert_with(HashSet::new)
+            .insert((
+                TransitionLabel::CharSet(CharSetType::Positive(hex_ranges)),
+                14,
+            ));
+
+        expected_transitions
+            .entry(14)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 10));
+
+        expected_transitions
+            .entry(15)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 16));
+        expected_transitions
+            .entry(15)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Escape(EscapeChar::Whitespace), 16));
+
+        expected_transitions
+            .entry(16)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::Epsilon, 17));
+
+        expected_transitions
+            .entry(17)
+            .or_insert_with(HashSet::new)
+            .insert((TransitionLabel::EndAnchorAssertion, 18));
+
+        expected_accept_states.insert(18, "COMPLEX_TOKEN".to_string());
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 19,
+        };
+
+        assert_eq!(nfa, expected_nfa);
     }
 }
