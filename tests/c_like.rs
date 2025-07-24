@@ -1,4 +1,4 @@
-use lexor::*; // Assuming your macros and language types are in the 'lexor' crate
+use lexer::*; // Assuming your macros and language types are in the 'lexor' crate
 
 #[test]
 fn c_like_language() {

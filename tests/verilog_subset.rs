@@ -1,4 +1,4 @@
-use lexor::*;
+use lexer::*;
 
 #[test]
 fn verilog_subset_macro() {

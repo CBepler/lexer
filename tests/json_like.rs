@@ -1,4 +1,4 @@
-use lexor::*;
+use lexer::*;
 
 #[test]
 fn json_like_language() {
