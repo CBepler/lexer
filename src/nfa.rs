@@ -394,6 +394,18 @@ mod tests {
 
     use super::*;
 
+    fn add_transition(
+        transitions: &mut HashMap<StateId, HashSet<(TransitionLabel, StateId)>>,
+        from: StateId,
+        label: TransitionLabel,
+        to: StateId,
+    ) {
+        transitions
+            .entry(from)
+            .or_insert_with(HashSet::new)
+            .insert((label, to));
+    }
+
     #[test]
     fn lexor_nfa_single_simple_concat() {
         let text = r"ab";
@@ -403,28 +415,12 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 2));
-
-        expected_transitions
-            .entry(2)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
-
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('b'), 4));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Char('a'), 2);
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 3);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Char('b'), 4);
 
         expected_accept_states.insert(4, vec![("AB_TOKEN".to_string(), 1)]);
 
@@ -447,17 +443,10 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('x'), 2));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Char('x'), 2);
 
         expected_accept_states.insert(2, vec![("X_TOKEN".to_string(), 1)]);
 
@@ -480,17 +469,10 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Any, 2));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Any, 2);
 
         expected_accept_states.insert(2, vec![("ANY_TOKEN".to_string(), 1)]);
 
@@ -513,42 +495,15 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 5));
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
-
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 4));
-
-        expected_transitions
-            .entry(5)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('b'), 6));
-
-        expected_transitions
-            .entry(4)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 2));
-
-        expected_transitions
-            .entry(6)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 2));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Epsilon, 5);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Epsilon, 3);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Char('a'), 4);
+        add_transition(&mut expected_transitions, 5, TransitionLabel::Char('b'), 6);
+        add_transition(&mut expected_transitions, 4, TransitionLabel::Epsilon, 2);
+        add_transition(&mut expected_transitions, 6, TransitionLabel::Epsilon, 2);
 
         expected_accept_states.insert(2, vec![("OR_TOKEN".to_string(), 1)]);
 
@@ -571,19 +526,16 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
         let ranges = vec![RangeType::MultiChar('a', 'c')];
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::CharSet(CharSetType::Positive(ranges)), 2));
+        add_transition(
+            &mut expected_transitions,
+            1,
+            TransitionLabel::CharSet(CharSetType::Positive(ranges)),
+            2,
+        );
 
         expected_accept_states.insert(2, vec![("RANGE_TOKEN".to_string(), 1)]);
 
@@ -606,19 +558,16 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
         let ranges = vec![RangeType::MultiChar('a', 'c')];
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::CharSet(CharSetType::Negative(ranges)), 2));
+        add_transition(
+            &mut expected_transitions,
+            1,
+            TransitionLabel::CharSet(CharSetType::Negative(ranges)),
+            2,
+        );
 
         expected_accept_states.insert(2, vec![("NOT_RANGE_TOKEN".to_string(), 1)]);
 
@@ -641,28 +590,12 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 2));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 2));
-
-        expected_transitions
-            .entry(2)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Char('a'), 2);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Epsilon, 2);
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 1);
 
         expected_accept_states.insert(2, vec![("STAR_TOKEN".to_string(), 1)]);
 
@@ -685,41 +618,15 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 2));
-
-        expected_transitions
-            .entry(2)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
-
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 4));
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 4));
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 4));
-
-        expected_transitions
-            .entry(4)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Char('a'), 2);
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 3);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Epsilon, 4);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Epsilon, 4);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Char('a'), 4);
+        add_transition(&mut expected_transitions, 4, TransitionLabel::Epsilon, 3);
 
         expected_accept_states.insert(4, vec![("PLUS_TOKEN".to_string(), 1)]);
 
@@ -742,22 +649,11 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 2));
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 2));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Char('a'), 2);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Epsilon, 2);
 
         expected_accept_states.insert(2, vec![("OPTIONAL_TOKEN".to_string(), 1)]);
 
@@ -780,17 +676,10 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 2));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Char('a'), 2);
 
         expected_accept_states.insert(2, vec![("GROUP_TOKEN".to_string(), 1)]);
 
@@ -816,29 +705,14 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 2));
-
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Char('a'), 2);
         expected_accept_states.insert(2, vec![("TOKEN_A".to_string(), 1)]);
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('b'), 4));
-
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 3);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Char('b'), 4);
         expected_accept_states.insert(4, vec![("TOKEN_B".to_string(), 2)]);
 
         let expected_nfa = LexerNFA {
@@ -860,28 +734,17 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::StartAnchorAssertion, 2));
-
-        expected_transitions
-            .entry(2)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
-
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 4));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(
+            &mut expected_transitions,
+            1,
+            TransitionLabel::StartAnchorAssertion,
+            2,
+        );
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 3);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Char('a'), 4);
 
         expected_accept_states.insert(4, vec![("START_ANCHOR_TOKEN".to_string(), 1)]);
 
@@ -904,28 +767,17 @@ mod tests {
 
         let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
             HashMap::new();
-
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 2));
-
-        expected_transitions
-            .entry(2)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
-
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::EndAnchorAssertion, 4));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Char('a'), 2);
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 3);
+        add_transition(
+            &mut expected_transitions,
+            3,
+            TransitionLabel::EndAnchorAssertion,
+            4,
+        );
 
         expected_accept_states.insert(4, vec![("END_ANCHOR_TOKEN".to_string(), 1)]);
 
@@ -949,35 +801,22 @@ mod tests {
             HashMap::new();
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::StartAnchorAssertion, 2));
-
-        expected_transitions
-            .entry(2)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
-
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 4));
-
-        expected_transitions
-            .entry(4)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 5));
-
-        expected_transitions
-            .entry(5)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::EndAnchorAssertion, 6));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(
+            &mut expected_transitions,
+            1,
+            TransitionLabel::StartAnchorAssertion,
+            2,
+        );
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 3);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Char('a'), 4);
+        add_transition(&mut expected_transitions, 4, TransitionLabel::Epsilon, 5);
+        add_transition(
+            &mut expected_transitions,
+            5,
+            TransitionLabel::EndAnchorAssertion,
+            6,
+        );
 
         expected_accept_states.insert(6, vec![("FULL_LINE_TOKEN".to_string(), 1)]);
 
@@ -1001,15 +840,13 @@ mod tests {
             HashMap::new();
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
-
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Escape(EscapeChar::Digit), 2));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(
+            &mut expected_transitions,
+            1,
+            TransitionLabel::Escape(EscapeChar::Digit),
+            2,
+        );
 
         expected_accept_states.insert(2, vec![("DIGIT_TOKEN".to_string(), 1)]);
 
@@ -1033,29 +870,14 @@ mod tests {
             HashMap::new();
         let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
 
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 2));
+        add_transition(&mut expected_transitions, 1, TransitionLabel::Char('a'), 2);
 
-        expected_transitions
-            .entry(2)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 3);
 
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 4));
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Char('a'), 4));
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Epsilon, 4);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Char('a'), 4);
 
         expected_accept_states.insert(4, vec![("QUANTIFIER_TOKEN".to_string(), 1)]);
 
@@ -1064,6 +886,112 @@ mod tests {
             transitions: expected_transitions,
             accept_states: expected_accept_states,
             next_state_id: 5,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
+    fn lexer_nfa_multiple_overlapping_accept() {
+        let text1 = r"^if$";
+        let text2 = r"^[a-zA-Z_][a-zA-Z0-9_]*$";
+        let regex1 = Regex::new(text1).unwrap();
+        let regex2 = Regex::new(text2).unwrap();
+        let nfa = LexerNFA::new(vec![
+            ("IF_TOKEN".to_string(), 2, regex1),
+            ("IDENTIFIER_TOKEN".to_string(), 1, regex2),
+        ])
+        .unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
+
+        let start_ranges = vec![
+            RangeType::MultiChar('a', 'z'),
+            RangeType::MultiChar('A', 'Z'),
+            RangeType::SingleChar('_'),
+        ];
+
+        let end_ranges = vec![
+            RangeType::MultiChar('a', 'z'),
+            RangeType::MultiChar('A', 'Z'),
+            RangeType::MultiChar('0', '9'),
+            RangeType::SingleChar('_'),
+        ];
+
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 9);
+
+        add_transition(
+            &mut expected_transitions,
+            1,
+            TransitionLabel::StartAnchorAssertion,
+            2,
+        );
+
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 3);
+
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Char('i'), 4);
+
+        add_transition(&mut expected_transitions, 4, TransitionLabel::Epsilon, 5);
+
+        add_transition(&mut expected_transitions, 5, TransitionLabel::Char('f'), 6);
+
+        add_transition(&mut expected_transitions, 6, TransitionLabel::Epsilon, 7);
+
+        add_transition(
+            &mut expected_transitions,
+            7,
+            TransitionLabel::EndAnchorAssertion,
+            8,
+        );
+
+        add_transition(
+            &mut expected_transitions,
+            9,
+            TransitionLabel::StartAnchorAssertion,
+            10,
+        );
+
+        add_transition(&mut expected_transitions, 10, TransitionLabel::Epsilon, 11);
+
+        add_transition(
+            &mut expected_transitions,
+            11,
+            TransitionLabel::CharSet(CharSetType::Positive(start_ranges)),
+            12,
+        );
+
+        add_transition(&mut expected_transitions, 12, TransitionLabel::Epsilon, 13);
+
+        add_transition(&mut expected_transitions, 13, TransitionLabel::Epsilon, 14);
+        add_transition(
+            &mut expected_transitions,
+            13,
+            TransitionLabel::CharSet(CharSetType::Positive(end_ranges)),
+            14,
+        );
+
+        add_transition(&mut expected_transitions, 14, TransitionLabel::Epsilon, 13);
+
+        add_transition(&mut expected_transitions, 14, TransitionLabel::Epsilon, 15);
+
+        add_transition(
+            &mut expected_transitions,
+            15,
+            TransitionLabel::EndAnchorAssertion,
+            16,
+        );
+
+        expected_accept_states.insert(8, vec![("IF_TOKEN".to_string(), 2)]);
+        expected_accept_states.insert(16, vec![("IDENTIFIER_TOKEN".to_string(), 1)]);
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 17,
         };
 
         assert_eq!(nfa, expected_nfa);
@@ -1081,123 +1009,77 @@ mod tests {
 
         let hex_ranges = vec![RangeType::MultiChar('a', 'f')];
 
-        expected_transitions
-            .entry(0)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 1));
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+        add_transition(
+            &mut expected_transitions,
+            1,
+            TransitionLabel::StartAnchorAssertion,
+            2,
+        );
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 3);
 
-        expected_transitions
-            .entry(1)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::StartAnchorAssertion, 2));
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Epsilon, 5);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Epsilon, 7);
 
-        expected_transitions
-            .entry(2)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 3));
+        add_transition(
+            &mut expected_transitions,
+            5,
+            TransitionLabel::Escape(EscapeChar::Digit),
+            6,
+        );
+        add_transition(
+            &mut expected_transitions,
+            7,
+            TransitionLabel::CharSet(CharSetType::Positive(hex_ranges.clone())),
+            8,
+        );
 
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 5));
-        expected_transitions
-            .entry(3)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 7));
+        add_transition(&mut expected_transitions, 6, TransitionLabel::Epsilon, 4);
+        add_transition(&mut expected_transitions, 8, TransitionLabel::Epsilon, 4);
 
-        expected_transitions
-            .entry(5)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Escape(EscapeChar::Digit), 6));
+        add_transition(&mut expected_transitions, 4, TransitionLabel::Epsilon, 9);
 
-        expected_transitions
-            .entry(7)
-            .or_insert_with(HashSet::new)
-            .insert((
-                TransitionLabel::CharSet(CharSetType::Positive(hex_ranges.clone())),
-                8,
-            ));
+        add_transition(&mut expected_transitions, 9, TransitionLabel::Epsilon, 11);
+        add_transition(&mut expected_transitions, 9, TransitionLabel::Epsilon, 13);
+        add_transition(&mut expected_transitions, 9, TransitionLabel::Epsilon, 10);
 
-        expected_transitions
-            .entry(6)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 4));
+        add_transition(&mut expected_transitions, 10, TransitionLabel::Epsilon, 9);
+        add_transition(&mut expected_transitions, 10, TransitionLabel::Epsilon, 15);
 
-        expected_transitions
-            .entry(8)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 4));
+        add_transition(
+            &mut expected_transitions,
+            11,
+            TransitionLabel::Escape(EscapeChar::Digit),
+            12,
+        );
+        add_transition(&mut expected_transitions, 12, TransitionLabel::Epsilon, 10);
 
-        expected_transitions
-            .entry(4)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 9));
+        add_transition(
+            &mut expected_transitions,
+            13,
+            TransitionLabel::CharSet(CharSetType::Positive(hex_ranges)),
+            14,
+        );
+        add_transition(&mut expected_transitions, 14, TransitionLabel::Epsilon, 10);
+
+        add_transition(&mut expected_transitions, 15, TransitionLabel::Epsilon, 16);
+        add_transition(
+            &mut expected_transitions,
+            15,
+            TransitionLabel::Escape(EscapeChar::Whitespace),
+            16,
+        );
+
+        add_transition(&mut expected_transitions, 16, TransitionLabel::Epsilon, 17);
+
+        add_transition(
+            &mut expected_transitions,
+            17,
+            TransitionLabel::EndAnchorAssertion,
+            18,
+        );
 
         expected_accept_states.insert(18, vec![("COMPLEX_TOKEN".to_string(), 1)]);
-
-        expected_transitions
-            .entry(9)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 11));
-        expected_transitions
-            .entry(9)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 10));
-        expected_transitions
-            .entry(9)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 13));
-
-        expected_transitions
-            .entry(10)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 9));
-        expected_transitions
-            .entry(10)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 15));
-
-        expected_transitions
-            .entry(11)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Escape(EscapeChar::Digit), 12));
-
-        expected_transitions
-            .entry(12)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 10));
-
-        expected_transitions
-            .entry(13)
-            .or_insert_with(HashSet::new)
-            .insert((
-                TransitionLabel::CharSet(CharSetType::Positive(hex_ranges)),
-                14,
-            ));
-
-        expected_transitions
-            .entry(14)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 10));
-
-        expected_transitions
-            .entry(15)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 16));
-        expected_transitions
-            .entry(15)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Escape(EscapeChar::Whitespace), 16));
-
-        expected_transitions
-            .entry(16)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::Epsilon, 17));
-
-        expected_transitions
-            .entry(17)
-            .or_insert_with(HashSet::new)
-            .insert((TransitionLabel::EndAnchorAssertion, 18));
 
         let expected_nfa = LexerNFA {
             start_state: 0,
