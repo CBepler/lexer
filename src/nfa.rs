@@ -94,6 +94,14 @@ impl LexerNFA {
         &self.transitions
     }
 
+    pub fn get_start_state(&self) -> &StateId {
+        &self.start_state
+    }
+
+    pub fn get_accept_states(&self) -> &HashMap<StateId, Vec<(String, i32)>> {
+        &self.accept_states
+    }
+
     fn add_transition(&mut self, from: StateId, label: TransitionLabel, to: StateId) -> bool {
         self.transitions
             .entry(from)
