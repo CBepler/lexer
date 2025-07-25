@@ -5,7 +5,7 @@ use crate::regex::{RangeType, Regex, RegexPattern, escapes::EscapeChar};
 type StateId = usize;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-enum TransitionLabel {
+pub enum TransitionLabel {
     Char(char),
     Any,
     Escape(EscapeChar),
@@ -88,6 +88,10 @@ impl LexerNFA {
             accept_vec.sort_by(|a, b| b.1.cmp(&a.1));
         }
         Ok(lexer_nfa)
+    }
+
+    pub fn get_transitions(&self) -> &HashMap<StateId, HashSet<(TransitionLabel, StateId)>> {
+        &self.transitions
     }
 
     fn add_transition(&mut self, from: StateId, label: TransitionLabel, to: StateId) -> bool {
