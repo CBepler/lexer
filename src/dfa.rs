@@ -33,11 +33,11 @@ impl TransitionLabel {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct LexerDFA {
     start_state: StateId,
     transitions: HashMap<StateId, HashMap<TransitionLabel, StateId>>,
-    accept_states: HashMap<StateId, Vec<(String, i32)>>,
+    accept_states: HashMap<StateId, String>,
     next_state_id: StateId,
 }
 
@@ -68,7 +68,7 @@ impl<'a> DFAConstructor<'a> {
         let mut unmarked_dfa_states_queue: VecDeque<StateId> = VecDeque::new();
         let mut dfa_transitions: HashMap<StateId, HashMap<TransitionLabel, StateId>> =
             HashMap::new();
-        let mut dfa_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
+        let mut dfa_accept_states: HashMap<StateId, String> = HashMap::new();
         let initial_nfa_closure: BTreeSet<StateId> = state_closures
             .get(nfa.get_start_state())
             .expect("NFA start state must have a closure")
@@ -98,7 +98,7 @@ impl<'a> DFAConstructor<'a> {
             }
             if !possible_accepts.is_empty() {
                 possible_accepts.sort_by(|a, b| b.1.cmp(&a.1));
-                dfa_accept_states.insert(current_dfa_state_id, possible_accepts);
+                dfa_accept_states.insert(current_dfa_state_id, possible_accepts.remove(0).0);
             }
             let mut current_dfa_state_transitions: HashMap<TransitionLabel, StateId> =
                 HashMap::new();
@@ -114,13 +114,15 @@ impl<'a> DFAConstructor<'a> {
                     }
                 }
                 if next_nfa_states_after_move.is_empty() {
-                    // If no NFA states are reachable on this input, it goes to a "dead" state.
                     continue;
                 }
+
                 let mut next_dfa_nfa_set: BTreeSet<StateId> = BTreeSet::new();
                 for &state_id_in_move_result in &next_nfa_states_after_move {
                     if let Some(closure) = state_closures.get(&state_id_in_move_result) {
                         next_dfa_nfa_set.extend(closure.iter().cloned());
+                    } else {
+                        next_dfa_nfa_set.insert(state_id_in_move_result);
                     }
                 }
                 let next_dfa_state_id =
@@ -137,7 +139,9 @@ impl<'a> DFAConstructor<'a> {
                     next_dfa_state_id,
                 );
             }
-            dfa_transitions.insert(current_dfa_state_id, current_dfa_state_transitions);
+            if !current_dfa_state_transitions.is_empty() {
+                dfa_transitions.insert(current_dfa_state_id, current_dfa_state_transitions);
+            }
         }
 
         Ok(LexerDFA {
@@ -206,16 +210,84 @@ fn get_state_closures(nfa: &LexerNFA) -> HashMap<StateId, HashSet<StateId>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{TransitionLabel::*, *};
     use crate::regex::Regex;
 
+    fn add_transition(
+        transitions: &mut HashMap<StateId, HashMap<TransitionLabel, StateId>>,
+        from: StateId,
+        label: TransitionLabel,
+        to: StateId,
+    ) {
+        transitions
+            .entry(from)
+            .or_insert_with(HashMap::new)
+            .insert(label, to);
+    }
+
     #[test]
-    fn dfa_simple() {
+    fn lexer_dfa_alternation() {
         let text = r"a|b";
         let regex = Regex::new(text).unwrap();
-        let nfa = LexerNFA::new(vec![("AB_TOKEN".to_string(), 1, regex)]).unwrap();
-        let dfa = LexerDFA::new(nfa);
-        println!("{:?}", dfa);
-        assert!(false);
+        let nfa = LexerNFA::new(vec![("ALTERNATION_TOKEN".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa).unwrap();
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+        add_transition(&mut expected_transitions, 0, Char('a'), 1);
+        add_transition(&mut expected_transitions, 0, Char('b'), 1);
+        expected_accepts.insert(1, "ALTERNATION_TOKEN".to_string());
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 2,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_kleene_plus() {
+        let text = r"a+";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("PLUS_TOKEN".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa).unwrap();
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+        add_transition(&mut expected_transitions, 0, Char('a'), 1);
+        add_transition(&mut expected_transitions, 1, Char('a'), 1);
+        expected_accepts.insert(1, "PLUS_TOKEN".to_string());
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 2,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_multiple_overlapping_accept() {
+        let text1 = r"^if$";
+        let text2 = r"^[a-zA-Z_][a-zA-Z0-9_]*$";
+        let regex1 = Regex::new(text1).unwrap();
+        let regex2 = Regex::new(text2).unwrap();
+        let nfa = LexerNFA::new(vec![
+            ("IF_TOKEN".to_string(), 2, regex1),
+            ("IDENTIFIER_TOKEN".to_string(), 1, regex2),
+        ])
+        .unwrap();
+        let dfa = LexerDFA::new(nfa).unwrap();
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+        add_transition(&mut expected_transitions, 0, Char('a'), 1);
+        add_transition(&mut expected_transitions, 0, Char('b'), 1);
+        expected_accepts.insert(1, "ALTERNATION_TOKEN".to_string());
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 2,
+        };
+        assert_eq!(dfa, expected_dfa);
     }
 }
