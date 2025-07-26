@@ -1,4 +1,4 @@
-use regex::Regex;
+use crate::regex::Regex;
 
 use token_behavior::{TokenBehavior, comment_end_condition::CommentEndCondition};
 

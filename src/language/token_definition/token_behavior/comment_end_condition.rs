@@ -1,4 +1,4 @@
-use regex::Regex;
+use crate::regex::Regex;
 
 #[derive(Debug)]
 pub enum CommentEndCondition {

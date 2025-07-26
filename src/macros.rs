@@ -106,7 +106,7 @@ mod tests {
     use crate::language::{
         CommentEndCondition, PairDefinition, PairDirection, TokenBehavior, TokenDefinition,
     };
-    use regex::Regex;
+    use crate::regex::Regex;
 
     fn create_expected_token(
         name: &str,

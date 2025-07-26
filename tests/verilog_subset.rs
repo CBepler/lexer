@@ -17,8 +17,8 @@ fn verilog_subset_macro() {
 
         store_token!("IDENTIFIER", r"^[a-zA-Z_][a-zA-Z0-9_]*"),
 
-        keyword!("COMMA", r"^\,"),
-        keyword!("SEMICOLON", r"^\;"),
+        keyword!("COMMA", r"^,"),
+        keyword!("SEMICOLON", r"^;"),
     };
 
     assert!(
