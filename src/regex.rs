@@ -35,8 +35,10 @@ impl RangeType {
     }
 }
 
+#[derive(Debug)]
 pub struct Regex {
     pattern: RegexPattern,
+    original_string: String,
 }
 
 impl Regex {
@@ -45,12 +47,19 @@ impl Regex {
         let pattern = parse_expression(&mut text_iter)?;
         match text_iter.next() {
             Some(x) => Err(format!("Invalid end of grouping without start: {x}")),
-            None => Ok(Regex { pattern }),
+            None => Ok(Regex {
+                pattern,
+                original_string: text.to_string(),
+            }),
         }
     }
 
     pub fn get_pattern(&self) -> &RegexPattern {
         &self.pattern
+    }
+
+    pub fn to_string(&self) -> &str {
+        &self.original_string
     }
 }
 
@@ -209,7 +218,7 @@ where
         's' => Ok(RegexPattern::EscapeChar(EscapeChar::Whitespace)),
         'w' => Ok(RegexPattern::EscapeChar(EscapeChar::WordCharacter)),
         'n' => Ok(RegexPattern::Literal('\n')),
-        '*' | '?' | '\\' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '.' => {
+        '*' | '?' | '\\' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '.' | '+' => {
             Ok(RegexPattern::Literal(escaped_char))
         }
         '\'' => Ok(RegexPattern::Literal('\'')),
@@ -312,7 +321,8 @@ where
         match next_op {
             Some(']') => {
                 if start_range != None {
-                    return Err("Invalid end of range after -".to_string());
+                    ranges.push(RangeType::SingleChar(start_range.unwrap()));
+                    ranges.push(RangeType::SingleChar('-'));
                 }
                 break;
             }
