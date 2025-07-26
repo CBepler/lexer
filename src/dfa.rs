@@ -434,4 +434,286 @@ mod tests {
         };
         assert_eq!(dfa, expected_dfa);
     }
+
+    #[test]
+    fn lexer_dfa_multiple_overlapping_accept_no_anchor() {
+        let text1 = r"if";
+        let text2 = r"[a-zA-Z_][a-zA-Z0-9_]*";
+        let regex1 = Regex::new(text1).unwrap();
+        let regex2 = Regex::new(text2).unwrap();
+        let nfa = LexerNFA::new(vec![
+            ("IF_TOKEN".to_string(), 2, regex1),
+            ("IDENTIFIER_TOKEN".to_string(), 1, regex2),
+        ])
+        .unwrap();
+        let dfa = LexerDFA::new(nfa);
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, Range('i', 'i'), 2);
+        add_transition(&mut expected_transitions, 0, Range('a', 'h'), 1);
+        add_transition(&mut expected_transitions, 0, Range('j', 'z'), 1);
+        add_transition(&mut expected_transitions, 0, Range('_', '_'), 1);
+        add_transition(&mut expected_transitions, 0, Range('A', 'Z'), 1);
+
+        add_transition(&mut expected_transitions, 1, Range('A', 'Z'), 1);
+        add_transition(&mut expected_transitions, 1, Range('a', 'z'), 1);
+        add_transition(&mut expected_transitions, 1, Range('0', '9'), 1);
+        add_transition(&mut expected_transitions, 1, Range('_', '_'), 1);
+
+        add_transition(&mut expected_transitions, 2, Range('_', '_'), 1);
+        add_transition(&mut expected_transitions, 2, Range('a', 'e'), 1);
+        add_transition(&mut expected_transitions, 2, Range('g', 'z'), 1);
+        add_transition(&mut expected_transitions, 2, Range('A', 'Z'), 1);
+        add_transition(&mut expected_transitions, 2, Range('0', '9'), 1);
+        add_transition(&mut expected_transitions, 2, Range('f', 'f'), 3);
+
+        add_transition(&mut expected_transitions, 3, Range('_', '_'), 1);
+        add_transition(&mut expected_transitions, 3, Range('a', 'z'), 1);
+        add_transition(&mut expected_transitions, 3, Range('A', 'Z'), 1);
+        add_transition(&mut expected_transitions, 3, Range('0', '9'), 1);
+
+        expected_accepts.insert(1, "IDENTIFIER_TOKEN".to_string());
+        expected_accepts.insert(2, "IDENTIFIER_TOKEN".to_string());
+        expected_accepts.insert(3, "IF_TOKEN".to_string());
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 4,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_single_char_quantifier_optional() {
+        let text = r"a?";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("OPTIONAL_A".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa);
+
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        expected_accepts.insert(0, "OPTIONAL_A".to_string());
+        add_transition(&mut expected_transitions, 0, Range('a', 'a'), 1);
+        expected_accepts.insert(1, "OPTIONAL_A".to_string());
+
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 2,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_kleene_star() {
+        let text = r"a*";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("STAR_A".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa);
+
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, Range('a', 'a'), 0);
+
+        expected_accepts.insert(0, "STAR_A".to_string());
+
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 1,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_digit_char_set() {
+        let text = r"\d";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("DIGIT_TOKEN".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa);
+
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, Range('0', '9'), 1);
+        expected_accepts.insert(1, "DIGIT_TOKEN".to_string());
+
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 2,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_word_char_set_plus() {
+        let text = r"\w+";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("WORD_TOKEN".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa);
+
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, Range('0', '9'), 1);
+        add_transition(&mut expected_transitions, 0, Range('A', 'Z'), 1);
+        add_transition(&mut expected_transitions, 0, Range('_', '_'), 1);
+        add_transition(&mut expected_transitions, 0, Range('a', 'z'), 1);
+
+        add_transition(&mut expected_transitions, 1, Range('0', '9'), 1);
+        add_transition(&mut expected_transitions, 1, Range('A', 'Z'), 1);
+        add_transition(&mut expected_transitions, 1, Range('_', '_'), 1);
+        add_transition(&mut expected_transitions, 1, Range('a', 'z'), 1);
+
+        expected_accepts.insert(1, "WORD_TOKEN".to_string());
+
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 2,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_whitespace_char() {
+        let text = r"\s";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("WHITESPACE_TOKEN".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa);
+
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, Range(' ', ' '), 1);
+        add_transition(&mut expected_transitions, 0, Range('\t', '\t'), 1);
+        add_transition(&mut expected_transitions, 0, Range('\n', '\n'), 1);
+        add_transition(&mut expected_transitions, 0, Range('\r', '\r'), 1);
+        add_transition(
+            &mut expected_transitions,
+            0,
+            Range('\u{000C}', '\u{000C}'),
+            1,
+        );
+
+        expected_accepts.insert(1, "WHITESPACE_TOKEN".to_string());
+
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 2,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_ranges_and_concatenation() {
+        let text = r"c[a-c]t";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("COMPLEX_TOKEN".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa);
+
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, Range('c', 'c'), 1);
+        add_transition(&mut expected_transitions, 1, Range('a', 'c'), 2);
+        add_transition(&mut expected_transitions, 2, Range('t', 't'), 3);
+
+        expected_accepts.insert(3, "COMPLEX_TOKEN".to_string());
+
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 4,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_dot_any_char() {
+        let text = r".";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("ANY_CHAR_TOKEN".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa);
+
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, Range('\0', '\u{10FFFF}'), 1);
+        expected_accepts.insert(1, "ANY_CHAR_TOKEN".to_string());
+
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 2,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_word_boundary_at_start() {
+        let text = r"\bword";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("BW_WORD".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa);
+
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, WordBoundry, 1);
+        add_transition(&mut expected_transitions, 1, Range('w', 'w'), 2);
+        add_transition(&mut expected_transitions, 2, Range('o', 'o'), 3);
+        add_transition(&mut expected_transitions, 3, Range('r', 'r'), 4);
+        add_transition(&mut expected_transitions, 4, Range('d', 'd'), 5);
+
+        expected_accepts.insert(5, "BW_WORD".to_string());
+
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 6,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
+
+    #[test]
+    fn lexer_dfa_word_boundary_at_end() {
+        let text = r"word\b";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("WORD_BW".to_string(), 1, regex)]).unwrap();
+        let dfa = LexerDFA::new(nfa);
+
+        let mut expected_transitions = HashMap::new();
+        let mut expected_accepts = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, Range('w', 'w'), 1);
+        add_transition(&mut expected_transitions, 1, Range('o', 'o'), 2);
+        add_transition(&mut expected_transitions, 2, Range('r', 'r'), 3);
+        add_transition(&mut expected_transitions, 3, Range('d', 'd'), 4);
+        add_transition(&mut expected_transitions, 4, WordBoundry, 5);
+
+        expected_accepts.insert(5, "WORD_BW".to_string());
+
+        let expected_dfa = LexerDFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accepts,
+            next_state_id: 6,
+        };
+        assert_eq!(dfa, expected_dfa);
+    }
 }
