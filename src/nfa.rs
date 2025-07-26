@@ -792,6 +792,91 @@ mod tests {
     }
 
     #[test]
+    fn lexor_nfa_multiple_anchors() {
+        let text = r"^(a|(b|^c$))$";
+        let regex = Regex::new(text).unwrap();
+        let nfa = LexerNFA::new(vec![("MULTI_ANCHOR".to_string(), 1, regex)]).unwrap();
+
+        let mut expected_transitions: HashMap<StateId, HashSet<(TransitionLabel, StateId)>> =
+            HashMap::new();
+        let mut expected_accept_states: HashMap<StateId, Vec<(String, i32)>> = HashMap::new();
+
+        add_transition(&mut expected_transitions, 0, TransitionLabel::Epsilon, 1);
+
+        add_transition(
+            &mut expected_transitions,
+            1,
+            TransitionLabel::StartAnchorAssertion,
+            2,
+        );
+
+        add_transition(&mut expected_transitions, 2, TransitionLabel::Epsilon, 3);
+
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Epsilon, 5);
+        add_transition(&mut expected_transitions, 3, TransitionLabel::Epsilon, 7);
+
+        add_transition(&mut expected_transitions, 4, TransitionLabel::Epsilon, 17);
+
+        add_transition(&mut expected_transitions, 5, TransitionLabel::Char('a'), 6);
+
+        add_transition(&mut expected_transitions, 6, TransitionLabel::Epsilon, 4);
+
+        add_transition(&mut expected_transitions, 7, TransitionLabel::Epsilon, 9);
+        add_transition(&mut expected_transitions, 7, TransitionLabel::Epsilon, 11);
+
+        add_transition(&mut expected_transitions, 8, TransitionLabel::Epsilon, 4);
+
+        add_transition(&mut expected_transitions, 9, TransitionLabel::Char('b'), 10);
+
+        add_transition(&mut expected_transitions, 10, TransitionLabel::Epsilon, 8);
+
+        add_transition(
+            &mut expected_transitions,
+            11,
+            TransitionLabel::StartAnchorAssertion,
+            12,
+        );
+
+        add_transition(&mut expected_transitions, 12, TransitionLabel::Epsilon, 13);
+
+        add_transition(
+            &mut expected_transitions,
+            13,
+            TransitionLabel::Char('c'),
+            14,
+        );
+
+        add_transition(&mut expected_transitions, 14, TransitionLabel::Epsilon, 15);
+
+        add_transition(
+            &mut expected_transitions,
+            15,
+            TransitionLabel::EndAnchorAssertion,
+            16,
+        );
+
+        add_transition(&mut expected_transitions, 16, TransitionLabel::Epsilon, 8);
+
+        add_transition(
+            &mut expected_transitions,
+            17,
+            TransitionLabel::EndAnchorAssertion,
+            18,
+        );
+
+        expected_accept_states.insert(18, vec![("MULTI_ANCHOR".to_string(), 1)]);
+
+        let expected_nfa = LexerNFA {
+            start_state: 0,
+            transitions: expected_transitions,
+            accept_states: expected_accept_states,
+            next_state_id: 19,
+        };
+
+        assert_eq!(nfa, expected_nfa);
+    }
+
+    #[test]
     fn lexor_nfa_full_line_match() {
         let text = r"^a$";
         let regex = Regex::new(text).unwrap();
