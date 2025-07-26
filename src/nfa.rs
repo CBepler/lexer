@@ -21,6 +21,61 @@ pub enum CharSetType {
     Negative(Vec<RangeType>),
 }
 
+impl CharSetType {
+    pub fn to_char_range(&self) -> Vec<(char, char)> {
+        let (is_positive, ranges) = match self {
+            CharSetType::Positive(x) => (true, x),
+            CharSetType::Negative(x) => (false, x),
+        };
+        let mut char_ranges: Vec<(char, char)> =
+            ranges.iter().fold(Vec::new(), |mut acc, range_type| {
+                acc.extend(match range_type {
+                    RangeType::SingleChar(c) => vec![(*c, *c)],
+                    RangeType::MultiChar(low, high) => vec![(*low, *high)],
+                    RangeType::SingleEscape(e) => e.matching_ascii(),
+                });
+                acc
+            });
+        char_ranges.sort_by_key(|range| range.0);
+        let mut reduced_char_ranges = Vec::new();
+        let mut range_iter = char_ranges.into_iter();
+        if let Some((mut start, mut end)) = range_iter.next() {
+            while let Some((next_start, next_end)) = range_iter.next() {
+                if (end as u32) < (next_start as u32).saturating_sub(1) {
+                    reduced_char_ranges.push((start, end));
+                    start = next_start;
+                    end = next_end;
+                    continue;
+                }
+                if next_end > end {
+                    end = next_end;
+                }
+            }
+            reduced_char_ranges.push((start, end));
+        }
+        if is_positive {
+            return reduced_char_ranges;
+        }
+        if reduced_char_ranges.is_empty() {
+            return vec![('\0', '\u{10FFFF}')];
+        }
+        //Otherwise invert for negative range
+        let mut negative_ranges = Vec::new();
+        if reduced_char_ranges.first().unwrap().0 != '\0' {
+            negative_ranges.push(('\0', reduced_char_ranges.first().unwrap().0));
+        }
+        let mut start = reduced_char_ranges.first().unwrap().1;
+        for (next_start, next_end) in &reduced_char_ranges[1..] {
+            negative_ranges.push((start, *next_start));
+            start = *next_end;
+        }
+        if start != '\u{10FFFF}' {
+            negative_ranges.push((start, '\u{10FFFF}'));
+        }
+        negative_ranges
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct NFAFragment {
     start_state: StateId,

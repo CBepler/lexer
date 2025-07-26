@@ -7,28 +7,58 @@ use crate::{
 
 type StateId = usize;
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug, Ord, PartialOrd)]
 enum TransitionLabel {
-    Char(char),
-    Any,
-    Escape(EscapeChar),
     StartAnchorAssertion,
     EndAnchorAssertion,
-    CharSet(nfa::CharSetType),
+    WordBoundry,
+    Range(char, char),
 }
 
 impl TransitionLabel {
     fn from_nfa_transition(
         nfa_transition: &nfa::TransitionLabel,
-    ) -> Result<TransitionLabel, String> {
+    ) -> Result<Vec<TransitionLabel>, String> {
         match nfa_transition {
-            nfa::TransitionLabel::Any => Ok(TransitionLabel::Any),
-            nfa::TransitionLabel::Char(x) => Ok(TransitionLabel::Char(*x)),
-            nfa::TransitionLabel::CharSet(x) => Ok(TransitionLabel::CharSet(x.clone())),
-            nfa::TransitionLabel::EndAnchorAssertion => Ok(TransitionLabel::EndAnchorAssertion),
-            nfa::TransitionLabel::StartAnchorAssertion => Ok(TransitionLabel::StartAnchorAssertion),
-            nfa::TransitionLabel::Escape(x) => Ok(TransitionLabel::Escape(*x)),
+            nfa::TransitionLabel::Any => Ok(vec![TransitionLabel::Range('\0', '\u{10FFFF}')]),
+            nfa::TransitionLabel::Char(x) => Ok(vec![TransitionLabel::Range(*x, *x)]),
+            nfa::TransitionLabel::CharSet(x) => Ok(x
+                .to_char_range()
+                .iter()
+                .map(|(low, high)| TransitionLabel::Range(*low, *high))
+                .collect()),
+            nfa::TransitionLabel::EndAnchorAssertion => {
+                Ok(vec![TransitionLabel::EndAnchorAssertion])
+            }
+            nfa::TransitionLabel::StartAnchorAssertion => {
+                Ok(vec![TransitionLabel::StartAnchorAssertion])
+            }
+            nfa::TransitionLabel::Escape(x) => Ok(match x {
+                EscapeChar::WordBoundry => vec![TransitionLabel::WordBoundry],
+                x => x
+                    .matching_ascii()
+                    .iter()
+                    .map(|(low, high)| TransitionLabel::Range(*low, *high))
+                    .collect(),
+            }),
             nfa::TransitionLabel::Epsilon => Err("No Epsilons allowed in DFA".to_string()),
+        }
+    }
+
+    fn encompasses(&self, other: &Self) -> bool {
+        match self {
+            TransitionLabel::StartAnchorAssertion => {
+                other == &TransitionLabel::StartAnchorAssertion
+            }
+            TransitionLabel::EndAnchorAssertion => other == &TransitionLabel::EndAnchorAssertion,
+            TransitionLabel::WordBoundry => other == &TransitionLabel::WordBoundry,
+            TransitionLabel::Range(low, high) => {
+                if let TransitionLabel::Range(other_low, other_high) = other {
+                    return (low <= other_low) & (high >= other_high);
+                } else {
+                    return false;
+                }
+            }
         }
     }
 }
@@ -42,7 +72,7 @@ pub struct LexerDFA {
 }
 
 impl LexerDFA {
-    pub fn new(nfa: LexerNFA) -> Result<Self, String> {
+    pub fn new(nfa: LexerNFA) -> Self {
         let mut next_state_id_counter: StateId = 0;
         let mut constructor = DFAConstructor {
             next_state_id: &mut next_state_id_counter,
@@ -62,7 +92,7 @@ impl<'a> DFAConstructor<'a> {
         id
     }
 
-    fn construct(&mut self, nfa: LexerNFA) -> Result<LexerDFA, String> {
+    fn construct(&mut self, nfa: LexerNFA) -> LexerDFA {
         let state_closures = get_state_closures(&nfa);
         let mut nfa_sets_to_dfa_ids: HashMap<BTreeSet<StateId>, StateId> = HashMap::new();
         let mut unmarked_dfa_states_queue: VecDeque<StateId> = VecDeque::new();
@@ -90,6 +120,7 @@ impl<'a> DFAConstructor<'a> {
                 })
                 .expect("DFA state ID not found in nfa_sets_to_dfa_ids")
                 .clone();
+            println!("Current NFA State set: {:?}", current_nfa_states_set);
             let mut possible_accepts: Vec<(String, i32)> = Vec::new();
             for &nfa_state in &current_nfa_states_set {
                 if let Some(nfa_accept_info) = nfa.get_accept_states().get(&nfa_state) {
@@ -102,12 +133,23 @@ impl<'a> DFAConstructor<'a> {
             }
             let mut current_dfa_state_transitions: HashMap<TransitionLabel, StateId> =
                 HashMap::new();
-            for transition_label in get_all_possible_non_epsilon_transitions(&nfa) {
+            for transition_label in get_all_possible_dfa_transitions(&nfa, &current_nfa_states_set)
+            {
                 let mut next_nfa_states_after_move: HashSet<StateId> = HashSet::new();
                 for &nfa_state_in_set in &current_nfa_states_set {
                     if let Some(nfa_transitions) = nfa.get_transitions().get(&nfa_state_in_set) {
                         for (nfa_trans_label, nfa_target_state) in nfa_transitions {
-                            if nfa_trans_label == &transition_label {
+                            if *nfa_trans_label == nfa::TransitionLabel::Epsilon {
+                                continue;
+                            }
+                            println!("NFA Trans label: {:?}", nfa_trans_label);
+                            let dfa_transitions =
+                                TransitionLabel::from_nfa_transition(nfa_trans_label).unwrap();
+                            println!("DFA transition: {:?}", dfa_transitions);
+                            if dfa_transitions
+                                .iter()
+                                .any(|transition| transition.encompasses(&transition_label))
+                            {
                                 next_nfa_states_after_move.insert(*nfa_target_state);
                             }
                         }
@@ -134,35 +176,110 @@ impl<'a> DFAConstructor<'a> {
                         unmarked_dfa_states_queue.push_back(new_id);
                         new_id
                     };
-                current_dfa_state_transitions.insert(
-                    TransitionLabel::from_nfa_transition(&transition_label)?,
-                    next_dfa_state_id,
-                );
+                current_dfa_state_transitions.insert(transition_label, next_dfa_state_id);
             }
             if !current_dfa_state_transitions.is_empty() {
                 dfa_transitions.insert(current_dfa_state_id, current_dfa_state_transitions);
             }
         }
 
-        Ok(LexerDFA {
+        LexerDFA {
             start_state: dfa_start_state_id,
             transitions: dfa_transitions,
             accept_states: dfa_accept_states,
             next_state_id: *self.next_state_id,
-        })
+        }
     }
 }
 
-fn get_all_possible_non_epsilon_transitions(nfa: &LexerNFA) -> HashSet<nfa::TransitionLabel> {
-    let mut labels = HashSet::new();
-    for (_, transitions) in nfa.get_transitions() {
-        for (label, _) in transitions {
-            if !matches!(label, nfa::TransitionLabel::Epsilon) {
-                labels.insert(label.clone());
+fn get_all_possible_dfa_transitions(
+    nfa: &LexerNFA,
+    current_nfa_state_set: &BTreeSet<StateId>,
+) -> BTreeSet<TransitionLabel> {
+    let mut transitions = Vec::new();
+    let nfa_transitions = nfa.get_transitions();
+    let mut has_start_anchor = false;
+    let mut has_end_anchor = false;
+    let mut has_word_boundry = false;
+    println!("Getting possible transitions");
+    for state in current_nfa_state_set {
+        if let Some(state_transitions) = nfa_transitions.get(&state) {
+            for (transition, _) in state_transitions {
+                let dfa_transition_res = TransitionLabel::from_nfa_transition(transition);
+                let dfa_transitions = match dfa_transition_res {
+                    Ok(transitions) => transitions,
+                    Err(_) => continue,
+                };
+                for dfa_transition in dfa_transitions {
+                    match dfa_transition {
+                        TransitionLabel::StartAnchorAssertion => has_start_anchor = true,
+                        TransitionLabel::EndAnchorAssertion => has_end_anchor = true,
+                        TransitionLabel::WordBoundry => has_word_boundry = true,
+                        TransitionLabel::Range(low, high) => {
+                            transitions.push((low, high));
+                        }
+                    }
+                }
             }
         }
     }
-    labels
+    println!("Transitions raw: {:?}", transitions);
+    transitions.sort_by_key(|range| (*range).0);
+    let mut disjoint_transitions = BTreeSet::new();
+    let mut range_iter = transitions.into_iter();
+    if let Some((mut start, mut end)) = range_iter.next() {
+        while let Some((next_start, next_end)) = range_iter.next() {
+            if end >= next_start {
+                if end > next_end {
+                    if (next_start as u32) - (start as u32) > 1 {
+                        disjoint_transitions.insert(TransitionLabel::Range(
+                            start,
+                            char::from_u32((next_start as u32) - 1).unwrap(),
+                        ));
+                    }
+                    disjoint_transitions.insert(TransitionLabel::Range(next_start, next_end));
+                    let start_op = char::from_u32((next_end as u32) + 1);
+                    match start_op {
+                        Some(s) => start = s,
+                        None => break,
+                    }
+                } else if end == next_end {
+                    disjoint_transitions.insert(TransitionLabel::Range(start, next_start));
+                    let start_op = char::from_u32((next_start as u32) + 1);
+                    match start_op {
+                        Some(s) => start = s,
+                        None => break,
+                    }
+                } else {
+                    if (start as u32) - (next_start as u32) > 1 {
+                        disjoint_transitions.insert(TransitionLabel::Range(
+                            start,
+                            char::from_u32((next_start as u32) - 1).unwrap(),
+                        ));
+                    }
+                    disjoint_transitions.insert(TransitionLabel::Range(next_start, end));
+                    start = char::from_u32((end as u32) + 1).unwrap();
+                    end = next_end;
+                }
+            } else {
+                disjoint_transitions.insert(TransitionLabel::Range(start, end));
+                start = next_start;
+                end = next_end;
+            }
+        }
+        disjoint_transitions.insert(TransitionLabel::Range(start, end));
+    }
+    if has_start_anchor {
+        disjoint_transitions.insert(TransitionLabel::StartAnchorAssertion);
+    }
+    if has_end_anchor {
+        disjoint_transitions.insert(TransitionLabel::EndAnchorAssertion);
+    }
+    if has_word_boundry {
+        disjoint_transitions.insert(TransitionLabel::WordBoundry);
+    }
+    println!("Reduce transitions: {:?}", disjoint_transitions);
+    disjoint_transitions
 }
 
 fn get_state_closures(nfa: &LexerNFA) -> HashMap<StateId, HashSet<StateId>> {
@@ -230,11 +347,11 @@ mod tests {
         let text = r"a|b";
         let regex = Regex::new(text).unwrap();
         let nfa = LexerNFA::new(vec![("ALTERNATION_TOKEN".to_string(), 1, regex)]).unwrap();
-        let dfa = LexerDFA::new(nfa).unwrap();
+        let dfa = LexerDFA::new(nfa);
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
-        add_transition(&mut expected_transitions, 0, Char('a'), 1);
-        add_transition(&mut expected_transitions, 0, Char('b'), 1);
+        add_transition(&mut expected_transitions, 0, Range('a', 'a'), 1);
+        add_transition(&mut expected_transitions, 0, Range('b', 'b'), 1);
         expected_accepts.insert(1, "ALTERNATION_TOKEN".to_string());
         let expected_dfa = LexerDFA {
             start_state: 0,
@@ -250,11 +367,11 @@ mod tests {
         let text = r"a+";
         let regex = Regex::new(text).unwrap();
         let nfa = LexerNFA::new(vec![("PLUS_TOKEN".to_string(), 1, regex)]).unwrap();
-        let dfa = LexerDFA::new(nfa).unwrap();
+        let dfa = LexerDFA::new(nfa);
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
-        add_transition(&mut expected_transitions, 0, Char('a'), 1);
-        add_transition(&mut expected_transitions, 1, Char('a'), 1);
+        add_transition(&mut expected_transitions, 0, Range('a', 'a'), 1);
+        add_transition(&mut expected_transitions, 1, Range('a', 'a'), 1);
         expected_accepts.insert(1, "PLUS_TOKEN".to_string());
         let expected_dfa = LexerDFA {
             start_state: 0,
@@ -276,17 +393,44 @@ mod tests {
             ("IDENTIFIER_TOKEN".to_string(), 1, regex2),
         ])
         .unwrap();
-        let dfa = LexerDFA::new(nfa).unwrap();
+        let dfa = LexerDFA::new(nfa);
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
-        add_transition(&mut expected_transitions, 0, Char('a'), 1);
-        add_transition(&mut expected_transitions, 0, Char('b'), 1);
-        expected_accepts.insert(1, "ALTERNATION_TOKEN".to_string());
+        add_transition(&mut expected_transitions, 0, StartAnchorAssertion, 1);
+
+        add_transition(&mut expected_transitions, 1, Range('i', 'i'), 3);
+        add_transition(&mut expected_transitions, 1, Range('a', 'h'), 2);
+        add_transition(&mut expected_transitions, 1, Range('j', 'z'), 2);
+        add_transition(&mut expected_transitions, 1, Range('_', '_'), 2);
+        add_transition(&mut expected_transitions, 1, Range('A', 'Z'), 2);
+
+        add_transition(&mut expected_transitions, 2, Range('A', 'Z'), 2);
+        add_transition(&mut expected_transitions, 2, Range('a', 'z'), 2);
+        add_transition(&mut expected_transitions, 2, Range('0', '9'), 2);
+        add_transition(&mut expected_transitions, 2, Range('_', '_'), 2);
+        add_transition(&mut expected_transitions, 2, EndAnchorAssertion, 4);
+
+        add_transition(&mut expected_transitions, 3, Range('_', '_'), 2);
+        add_transition(&mut expected_transitions, 3, Range('a', 'e'), 2);
+        add_transition(&mut expected_transitions, 3, Range('g', 'z'), 2);
+        add_transition(&mut expected_transitions, 3, Range('A', 'Z'), 2);
+        add_transition(&mut expected_transitions, 3, Range('0', '9'), 2);
+        add_transition(&mut expected_transitions, 3, Range('f', 'f'), 5);
+        add_transition(&mut expected_transitions, 3, EndAnchorAssertion, 4);
+
+        add_transition(&mut expected_transitions, 5, Range('_', '_'), 2);
+        add_transition(&mut expected_transitions, 5, Range('a', 'z'), 2);
+        add_transition(&mut expected_transitions, 5, Range('A', 'Z'), 2);
+        add_transition(&mut expected_transitions, 5, Range('0', '9'), 2);
+        add_transition(&mut expected_transitions, 5, EndAnchorAssertion, 6);
+
+        expected_accepts.insert(4, "IDENTIFIER_TOKEN".to_string());
+        expected_accepts.insert(6, "IF_TOKEN".to_string());
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
-            next_state_id: 2,
+            next_state_id: 7,
         };
         assert_eq!(dfa, expected_dfa);
     }
