@@ -25,6 +25,16 @@ pub enum RangeType {
     SingleEscape(EscapeChar),
 }
 
+impl RangeType {
+    pub fn contains(&self, c: char) -> bool {
+        match self {
+            RangeType::SingleChar(ch) => *ch == c,
+            RangeType::MultiChar(low, high) => (*low <= c) & (*high >= c),
+            RangeType::SingleEscape(e) => e.matches_char(c),
+        }
+    }
+}
+
 pub struct Regex {
     pattern: RegexPattern,
 }
