@@ -8,7 +8,7 @@ use crate::{
 type StateId = usize;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Ord, PartialOrd)]
-enum TransitionLabel {
+pub enum TransitionLabel {
     StartAnchorAssertion,
     EndAnchorAssertion,
     WordBoundry,
@@ -78,6 +78,17 @@ impl LexerDFA {
             next_state_id: &mut next_state_id_counter,
         };
         constructor.construct(nfa)
+    }
+
+    pub fn get_start_state(&self) -> StateId {
+        self.start_state
+    }
+
+    pub fn get_state_transitions(
+        &self,
+        current_state: StateId,
+    ) -> Option<&HashMap<TransitionLabel, StateId>> {
+        self.transitions.get(&current_state)
     }
 }
 
