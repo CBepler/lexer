@@ -37,6 +37,22 @@ impl Transitions {
             range_transitions,
         })
     }
+
+    pub fn get_start_anchor_assertion_target(&self) -> &Option<StateId> {
+        &self.start_anchor_assertion_target
+    }
+
+    pub fn get_end_anchor_assertion_target(&self) -> &Option<StateId> {
+        &self.end_anchor_assertion_target
+    }
+
+    pub fn get_word_boundry_assertion_target(&self) -> &Option<StateId> {
+        &self.word_boundry_assertion_target
+    }
+
+    pub fn get_range_transitions(&self) -> &Vec<((char, char), StateId)> {
+        &self.range_transitions
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Ord, PartialOrd)]
@@ -119,6 +135,10 @@ impl LexerDFA {
     pub fn get_state_transitions(&self, current_state: StateId) -> Option<&Transitions> {
         self.transitions.get(&current_state)
     }
+
+    pub fn get_accept_states(&self) -> &HashMap<StateId, String> {
+        &self.accept_states
+    }
 }
 
 struct DFAConstructor<'a> {
@@ -159,7 +179,6 @@ impl<'a> DFAConstructor<'a> {
                 })
                 .expect("DFA state ID not found in nfa_sets_to_dfa_ids")
                 .clone();
-            println!("Current NFA State set: {:?}", current_nfa_states_set);
             let mut possible_accepts: Vec<(String, i32)> = Vec::new();
             for &nfa_state in &current_nfa_states_set {
                 if let Some(nfa_accept_info) = nfa.get_accept_states().get(&nfa_state) {
@@ -181,10 +200,8 @@ impl<'a> DFAConstructor<'a> {
                             if *nfa_trans_label == nfa::TransitionLabel::Epsilon {
                                 continue;
                             }
-                            println!("NFA Trans label: {:?}", nfa_trans_label);
                             let dfa_transitions =
                                 TransitionLabel::from_nfa_transition(nfa_trans_label).unwrap();
-                            println!("DFA transition: {:?}", dfa_transitions);
                             if dfa_transitions
                                 .iter()
                                 .any(|transition| transition.encompasses(&transition_label))
@@ -239,7 +256,6 @@ fn get_all_possible_dfa_transitions(
     let mut has_start_anchor = false;
     let mut has_end_anchor = false;
     let mut has_word_boundry = false;
-    println!("Getting possible transitions");
     for state in current_nfa_state_set {
         if let Some(state_transitions) = nfa_transitions.get(&state) {
             for (transition, _) in state_transitions {
@@ -261,7 +277,6 @@ fn get_all_possible_dfa_transitions(
             }
         }
     }
-    println!("Transitions raw: {:?}", transitions);
     transitions.sort_by_key(|range| (*range).0);
     let mut disjoint_transitions = BTreeSet::new();
     let mut range_iter = transitions.into_iter();
@@ -316,7 +331,6 @@ fn get_all_possible_dfa_transitions(
     if has_word_boundry {
         disjoint_transitions.insert(TransitionLabel::WordBoundry);
     }
-    println!("Reduce transitions: {:?}", disjoint_transitions);
     disjoint_transitions
 }
 
