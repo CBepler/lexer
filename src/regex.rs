@@ -35,7 +35,7 @@ impl RangeType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Regex {
     pattern: RegexPattern,
     original_string: String,

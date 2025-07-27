@@ -4,21 +4,27 @@ use lexer::*;
 fn arithmetic_expression_language() {
     let language_result = define_language! {
         // Ignore whitespace
-        ignore_token!("WHITESPACE", r"^\s+"),
+        // Whitespace is usually low priority and not stored.
+        ignore_token!("WHITESPACE", r"^\s+", 10),
 
         // Numbers (integers and floating-point)
-        store_token!("FLOAT_LITERAL", r"^\d+\.\d+"), // Must come before INTEGER_LITERAL
-        store_token!("INTEGER_LITERAL", r"^\d+"),
+        // FLOAT_LITERAL must have higher priority than INTEGER_LITERAL
+        // to ensure "1.23" is matched as a float, not "1" then ".23".
+        // Both need their value stored (`true` for `to_store`).
+        token!("FLOAT_LITERAL", r"^\d+\.\d+", 100, true),
+        token!("INTEGER_LITERAL", r"^\d+", 90, true),
 
         // Operators
-        keyword!("PLUS", r"^\+"),
-        keyword!("MINUS", r"^-"),
-        keyword!("MULTIPLY", r"^\*"),
-        keyword!("DIVIDE", r"^/"),
+        // Operators are typically high priority, and their lexeme isn't stored.
+        keyword!("PLUS", r"^\+", 80),
+        keyword!("MINUS", r"^-", 80),
+        keyword!("MULTIPLY", r"^\*", 80),
+        keyword!("DIVIDE", r"^/", 80),
 
         // Parentheses for grouping
-        open_pair!("LEFT_PAREN", r"^\(", "RIGHT_PAREN"),
-        close_pair!("RIGHT_PAREN", r"^\)", "LEFT_PAREN"),
+        // Pairs are usually high priority and don't store their lexeme.
+        open_pair!("LEFT_PAREN", r"^\(", "RIGHT_PAREN", 70),
+        close_pair!("RIGHT_PAREN", r"^\)", "LEFT_PAREN", 70),
     };
 
     assert!(

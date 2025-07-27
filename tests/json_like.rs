@@ -4,31 +4,36 @@ use lexer::*;
 fn json_like_language() {
     let language_result = define_language! {
         // Ignore whitespace
-        ignore_token!("WHITESPACE", r"^\s+"),
+        // Whitespace is usually low priority and not stored.
+        ignore_token!("WHITESPACE", r"^\s+", 10),
 
         // Keywords
-        keyword!("TRUE", r"^true\b"),
-        keyword!("FALSE", r"^false\b"),
-        keyword!("NULL", r"^null\b"),
+        // Keywords are often high priority to prevent them from being matched as identifiers, and their lexeme isn't stored.
+        keyword!("TRUE", r"^true\b", 100),
+        keyword!("FALSE", r"^false\b", 100),
+        keyword!("NULL", r"^null\b", 100),
 
-        // String literals (basic, doesn't handle all JSON escapes but covers common ones)
-        // Matches " followed by any character that is not " or \
-        // or an escaped character (\\, \", \/, \b, \f, \n, \r, \t, \uXXXX)
-        // followed by "
-        store_token!("STRING_LITERAL", r#"^"([^"\\]|\\.)*""#),
+        // String literals
+        // String literals need their actual content stored, hence `true` for `to_store`. They also need a high priority.
+        token!("STRING_LITERAL", r#"^"([^"\\]|\\.)*""#, 90, true),
 
-        // Number literals (integers and floats, simplified)
-        store_token!("NUMBER_LITERAL", r"^-?\d+(\.\d+)?([eE][+-]?\d+)?"),
+        // Number literals
+        // Number literals also need their actual value stored.
+        token!("NUMBER_LITERAL", r"^-?\d+(\.\d+)?([eE][+-]?\d+)?", 90, true),
 
         // Structural elements (paired)
-        open_pair!("LEFT_BRACE", r"^\{", "RIGHT_BRACE"),
-        close_pair!("RIGHT_BRACE", r"^\}", "LEFT_BRACE"),
-        open_pair!("LEFT_BRACKET", r"^\[", "RIGHT_BRACKET"),
-        close_pair!("RIGHT_BRACKET", r"^\]", "LEFT_BRACKET"),
+        // Pair symbols like braces and brackets typically don't need their lexeme stored.
+        // They are generally high priority.
+        open_pair!("LEFT_BRACE", r"^\{", "RIGHT_BRACE", 80),
+        close_pair!("RIGHT_BRACE", r"^\}", "LEFT_BRACE", 80),
+        open_pair!("LEFT_BRACKET", r"^\[", "RIGHT_BRACKET", 80),
+        close_pair!("RIGHT_BRACKET", r"^\]", "LEFT_BRACKET", 80),
 
         // Punctuation
-        keyword!("COLON", r"^:"),
-        keyword!("COMMA", r"^,"),
+        // Punctuation marks also usually don't need their lexeme stored.
+        // They should have a decent priority to be matched correctly.
+        keyword!("COLON", r"^:", 70),
+        keyword!("COMMA", r"^,", 70),
     };
 
     assert!(

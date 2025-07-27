@@ -4,7 +4,6 @@ pub use token_definition::{
     TokenDefinition,
     token_behavior::{
         TokenBehavior,
-        comment_end_condition::CommentEndCondition,
         pair_definition::{PairDefinition, PairDirection},
     },
 };
@@ -16,7 +15,7 @@ pub mod token_definition;
 
 #[derive(Debug)]
 pub struct Language {
-    token_definitions: Vec<TokenDefinition>,
+    pub token_definitions: Vec<TokenDefinition>,
 }
 
 impl Language {
@@ -99,18 +98,18 @@ mod tests {
 
     #[test]
     fn language_new_correct_creates_language() {
-        let module_result = keyword!("MODULE", r"module\b");
-        let identifier_result = store_token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*");
-        let open_paren_result = open_pair!("LEFT_PAREN", r"\(", "RIGHT_PAREN");
-        let close_paren_result = close_pair!("RIGHT_PAREN", r"\)", "LEFT_PAREN");
-        let input_result = keyword!("INPUT", r"input\b");
-        let wire_result = keyword!("WIRE", r"wire\b");
-        let comma_result = keyword!("COMMA", r",");
-        let output_result = keyword!("OUTPUT", r"output\b");
-        let semicolon_result = keyword!("SEMICOLON", r";");
-        let end_module_result = keyword!("END_MODULE", r"endmodule\b");
-        let single_line_comment_result = single_line_comment!("SINGLE_LINE_COMMENT", r"//");
-        let whitespace_result = ignore_token!("WHITESPACE", r"\s+");
+        let module_result = keyword!("MODULE", r"module\b", 100);
+        let identifier_result = token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*", 50, true);
+        let open_paren_result = open_pair!("LEFT_PAREN", r"\(", "RIGHT_PAREN", 90);
+        let close_paren_result = close_pair!("RIGHT_PAREN", r"\)", "LEFT_PAREN", 90);
+        let input_result = keyword!("INPUT", r"input\b", 100);
+        let wire_result = keyword!("WIRE", r"wire\b", 100);
+        let comma_result = keyword!("COMMA", r",", 70);
+        let output_result = keyword!("OUTPUT", r"output\b", 100);
+        let semicolon_result = keyword!("SEMICOLON", r";", 70);
+        let end_module_result = keyword!("END_MODULE", r"endmodule\b", 100);
+        let single_line_comment_result = ignore_until!("SINGLE_LINE_COMMENT", r"//", r"\n", 5);
+        let whitespace_result = ignore_token!("WHITESPACE", r"\s+", 10);
 
         let language_result = define_language! {
             whitespace_result,
@@ -137,17 +136,17 @@ mod tests {
 
     #[test]
     fn language_new_missing_closing_pair_creates_err() {
-        let module_result = keyword!("MODULE", r"module\b");
-        let identifier_result = store_token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*");
-        let open_paren_result = open_pair!("LEFT_PAREN", r"\(", "RIGHT_PAREN");
-        let input_result = keyword!("INPUT", r"input\b");
-        let wire_result = keyword!("WIRE", r"wire\b");
-        let comma_result = keyword!("COMMA", r",");
-        let output_result = keyword!("OUTPUT", r"output\b");
-        let semicolon_result = keyword!("SEMICOLON", r";");
-        let end_module_result = keyword!("END_MODULE", r"endmodule\b");
-        let single_line_comment_result = single_line_comment!("SINGLE_LINE_COMMENT", r"//");
-        let whitespace_result = ignore_token!("WHITESPACE", r"\s+");
+        let module_result = keyword!("MODULE", r"module\b", 100);
+        let identifier_result = token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*", 50, true);
+        let open_paren_result = open_pair!("LEFT_PAREN", r"\(", "RIGHT_PAREN", 90);
+        let input_result = keyword!("INPUT", r"input\b", 100);
+        let wire_result = keyword!("WIRE", r"wire\b", 100);
+        let comma_result = keyword!("COMMA", r",", 70);
+        let output_result = keyword!("OUTPUT", r"output\b", 100);
+        let semicolon_result = keyword!("SEMICOLON", r";", 70);
+        let end_module_result = keyword!("END_MODULE", r"endmodule\b", 100);
+        let single_line_comment_result = ignore_until!("SINGLE_LINE_COMMENT", r"//", r"\n", 5);
+        let whitespace_result = ignore_token!("WHITESPACE", r"\s+", 10);
 
         let language_result = define_language! {
             whitespace_result,
@@ -172,19 +171,19 @@ mod tests {
 
     #[test]
     fn language_new_duplicate_token_creates_err() {
-        let module_result = keyword!("MODULE", r"module\b");
-        let identifier_result = store_token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*");
-        let open_paren_result = open_pair!("LEFT_PAREN", r"\(", "RIGHT_PAREN");
-        let close_paren_result = close_pair!("RIGHT_PAREN", r"\)", "LEFT_PAREN");
-        let input_result = keyword!("INPUT", r"input\b");
-        let wire_result = keyword!("WIRE", r"wire\b");
-        let comma_result = keyword!("COMMA", r",");
-        let output_result = keyword!("OUTPUT", r"output\b");
-        let semicolon_result = keyword!("SEMICOLON", r";");
-        let end_module_result = keyword!("END_MODULE", r"endmodule\b");
-        let single_line_comment_result = single_line_comment!("SINGLE_LINE_COMMENT", r"//");
-        let comma_result2 = keyword!("COMMA", r",");
-        let whitespace_result = ignore_token!("WHITESPACE", r"\s+");
+        let module_result = keyword!("MODULE", r"module\b", 100);
+        let identifier_result = token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*", 50, true);
+        let open_paren_result = open_pair!("LEFT_PAREN", r"\(", "RIGHT_PAREN", 90);
+        let close_paren_result = close_pair!("RIGHT_PAREN", r"\)", "LEFT_PAREN", 90);
+        let input_result = keyword!("INPUT", r"input\b", 100);
+        let wire_result = keyword!("WIRE", r"wire\b", 100);
+        let comma_result = keyword!("COMMA", r",", 70);
+        let output_result = keyword!("OUTPUT", r"output\b", 100);
+        let semicolon_result = keyword!("SEMICOLON", r";", 70);
+        let end_module_result = keyword!("END_MODULE", r"endmodule\b", 100);
+        let single_line_comment_result = ignore_until!("SINGLE_LINE_COMMENT", r"//", r"\n", 5);
+        let comma_result2 = keyword!("COMMA", r",", 70);
+        let whitespace_result = ignore_token!("WHITESPACE", r"\s+", 10);
 
         let language_result = define_language! {
             whitespace_result,

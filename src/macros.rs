@@ -1,38 +1,50 @@
 #[macro_export]
 macro_rules! __lexor_create_token_definition {
-    ($name:expr, $regex_str:expr, $behavior:expr) => {
-        $crate::language::TokenDefinition::new($name.to_string(), $regex_str, $behavior)
-    };
-}
-
-#[macro_export]
-macro_rules! keyword {
-    ($name:expr, $regex_str:expr) => {
-        $crate::__lexor_create_token_definition!(
-            $name,
+    ($name:expr, $regex_str:expr, $priority:expr, $to_store:expr, $behavior:expr) => {
+        $crate::language::TokenDefinition::new(
+            $name.to_string(),
             $regex_str,
-            $crate::language::TokenBehavior::Keyword
+            $behavior,
+            $priority,
+            $to_store,
         )
     };
 }
 
 #[macro_export]
-macro_rules! store_token {
-    ($name:expr, $regex_str:expr) => {
+macro_rules! keyword {
+    ($name:expr, $regex_str:expr, $priority:expr) => {
         $crate::__lexor_create_token_definition!(
             $name,
             $regex_str,
-            $crate::language::TokenBehavior::Store
+            $priority,
+            false,
+            $crate::language::TokenBehavior::None
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! token {
+    ($name:expr, $regex_str:expr, $priority:expr, $to_store:expr) => {
+        $crate::__lexor_create_token_definition!(
+            $name,
+            $regex_str,
+            $priority,
+            $to_store,
+            $crate::language::TokenBehavior::None
         )
     };
 }
 
 #[macro_export]
 macro_rules! ignore_token {
-    ($name:expr, $regex_str:expr) => {
+    ($name:expr, $regex_str:expr, $priority:expr) => {
         $crate::__lexor_create_token_definition!(
             $name,
             $regex_str,
+            $priority,
+            false,
             $crate::language::TokenBehavior::Ignore
         )
     };
@@ -40,10 +52,12 @@ macro_rules! ignore_token {
 
 #[macro_export]
 macro_rules! open_pair {
-    ($name:expr, $regex_str:expr, $counterpart:expr) => {
+    ($name:expr, $regex_str:expr, $counterpart:expr, $priority:expr) => {
         $crate::__lexor_create_token_definition!(
             $name,
             $regex_str,
+            $priority,
+            false,
             $crate::language::TokenBehavior::Pair($crate::language::PairDefinition::new(
                 $crate::language::PairDirection::Open,
                 $counterpart.to_string(),
@@ -54,10 +68,12 @@ macro_rules! open_pair {
 
 #[macro_export]
 macro_rules! close_pair {
-    ($name:expr, $regex_str:expr, $counterpart:expr) => {
+    ($name:expr, $regex_str:expr, $counterpart:expr, $priority:expr) => {
         $crate::__lexor_create_token_definition!(
             $name,
             $regex_str,
+            $priority,
+            false,
             $crate::language::TokenBehavior::Pair($crate::language::PairDefinition::new(
                 $crate::language::PairDirection::Close,
                 $counterpart.to_string(),
@@ -67,27 +83,14 @@ macro_rules! close_pair {
 }
 
 #[macro_export]
-macro_rules! single_line_comment {
-    ($name:expr, $regex_str:expr) => {
+macro_rules! ignore_until {
+    ($name:expr, $regex_str:expr, $end_regex_str:expr, $priority:expr) => {
         $crate::__lexor_create_token_definition!(
             $name,
             $regex_str,
-            $crate::language::TokenBehavior::CommentStart(
-                $crate::language::CommentEndCondition::Newline,
-            )
-        )
-    };
-}
-
-#[macro_export]
-macro_rules! multi_line_comment {
-    ($name:expr, $start_regex_str:expr, $end_regex_str:expr) => {
-        $crate::__lexor_create_token_definition!(
-            $name,
-            $start_regex_str,
-            $crate::language::TokenBehavior::CommentStart(
-                $crate::language::CommentEndCondition::RegexStr($end_regex_str.to_string()),
-            )
+            $priority,
+            false,
+            $crate::language::TokenBehavior::IgnoreUntil($end_regex_str.to_string())
         )
     };
 }
@@ -103,47 +106,57 @@ macro_rules! define_language {
 
 #[cfg(test)]
 mod tests {
-    use crate::language::{
-        CommentEndCondition, PairDefinition, PairDirection, TokenBehavior, TokenDefinition,
-    };
-    use crate::regex::Regex;
+    use crate::language::{PairDefinition, PairDirection, TokenBehavior, TokenDefinition};
 
     fn create_expected_token(
         name: &str,
         regex_str: &str,
+        priority: i32,
+        to_store_match: bool,
         behavior: TokenBehavior,
     ) -> TokenDefinition {
-        TokenDefinition::new(name.to_string(), regex_str, behavior)
-            .expect("test failed in creating token definition")
+        TokenDefinition::new(
+            name.to_string(),
+            regex_str,
+            behavior, // Behavior is now the 3rd argument in TokenDefinition::new
+            priority,
+            to_store_match,
+        )
+        .expect("test failed in creating token definition")
     }
 
     #[test]
     fn test_keyword_macro() {
-        let result = keyword!("TEST_KEYWORD", r"test");
-        let expected = create_expected_token("TEST_KEYWORD", r"test", TokenBehavior::Keyword);
+        let result = keyword!("TEST_KEYWORD", r"test", 100);
+        let expected =
+            create_expected_token("TEST_KEYWORD", r"test", 100, false, TokenBehavior::None);
         assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
-    fn test_store_token_macro() {
-        let result = store_token!("TEST_IDENT", r"[a-z]+");
-        let expected = create_expected_token("TEST_IDENT", r"[a-z]+", TokenBehavior::Store);
+    fn test_token_macro() {
+        let result = token!("TEST_IDENT", r"[a-z]+", 50, true);
+        let expected =
+            create_expected_token("TEST_IDENT", r"[a-z]+", 50, true, TokenBehavior::None);
         assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
     fn test_ignore_token_macro() {
-        let result = ignore_token!("WHITESPACE", r"\s+");
-        let expected = create_expected_token("WHITESPACE", r"\s+", TokenBehavior::Ignore);
+        let result = ignore_token!("WHITESPACE", r"\s+", 10);
+        let expected =
+            create_expected_token("WHITESPACE", r"\s+", 10, false, TokenBehavior::Ignore);
         assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
     fn test_open_pair_macro() {
-        let result = open_pair!("L_BRACE", r"\{", "R_BRACE");
+        let result = open_pair!("L_BRACE", r"\{", "R_BRACE", 90);
         let expected = create_expected_token(
             "L_BRACE",
             r"\{",
+            90,
+            false,
             TokenBehavior::Pair(PairDefinition::new(
                 PairDirection::Open,
                 "R_BRACE".to_string(),
@@ -154,10 +167,12 @@ mod tests {
 
     #[test]
     fn test_close_pair_macro() {
-        let result = close_pair!("R_BRACE", r"\}", "L_BRACE");
+        let result = close_pair!("R_BRACE", r"\}", "L_BRACE", 90);
         let expected = create_expected_token(
             "R_BRACE",
             r"\}",
+            90,
+            false,
             TokenBehavior::Pair(PairDefinition::new(
                 PairDirection::Close,
                 "L_BRACE".to_string(),
@@ -167,33 +182,24 @@ mod tests {
     }
 
     #[test]
-    fn test_single_line_comment_macro() {
-        let result = single_line_comment!("SINGLE_COMMENT", r"//.*");
-        let expected = create_expected_token(
-            "SINGLE_COMMENT",
-            r"//.*",
-            TokenBehavior::CommentStart(CommentEndCondition::Newline),
-        );
-        assert_eq!(result.unwrap(), expected);
-    }
-
-    #[test]
-    fn test_multi_line_comment_macro() {
-        let result = multi_line_comment!("MULTI_COMMENT", r"/\*", r"\*/");
+    fn test_ignore_until_macro() {
+        let result = ignore_until!("MULTI_COMMENT", r"/\*", r"\*/", 5);
         let expected = create_expected_token(
             "MULTI_COMMENT",
             r"/\*",
-            TokenBehavior::CommentStart(CommentEndCondition::Regex(Regex::new(r"\*/").unwrap())),
+            5,
+            false,
+            TokenBehavior::IgnoreUntil(r"\*/".to_string()),
         );
         assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
     fn test_define_language_macro_success() {
-        let module_token = keyword!("MODULE", r"^module\b");
-        let identifier_token = store_token!("IDENTIFIER", r"^[a-zA-Z_][a-zA-Z0-9_]*");
-        let open_paren_token = open_pair!("LEFT_PAREN", r"^\(", "RIGHT_PAREN");
-        let close_paren_token = close_pair!("RIGHT_PAREN", r"^\)", "LEFT_PAREN");
+        let module_token = keyword!("MODULE", r"^module\b", 100);
+        let identifier_token = token!("IDENTIFIER", r"^[a-zA-Z_][a-zA-Z0-9_]*", 50, true);
+        let open_paren_token = open_pair!("LEFT_PAREN", r"^\(", "RIGHT_PAREN", 90);
+        let close_paren_token = close_pair!("RIGHT_PAREN", r"^\)", "LEFT_PAREN", 90);
 
         let language_result = define_language! {
             module_token,
