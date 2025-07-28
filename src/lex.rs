@@ -122,12 +122,6 @@ impl Lexer {
         }
         let nfa = LexerNFA::new(patterns)?;
         let language_dfa = LexerDFA::new(nfa)?;
-        println!("Language DFA: {:?}", language_dfa);
-        println!("ignore DFAs: {:?}", ignore_dfas);
-        println!("open_pairs: {:?}", open_pairs);
-        println!("close_pairs: {:?}", close_pairs);
-        println!("ignores: {:?}", ignores);
-        println!("to_store: {:?}", to_store);
         Ok(Lexer {
             language_dfa,
             ignore_dfas,
@@ -186,9 +180,6 @@ impl Lexer {
                         continue;
                     };
 
-                    println!("Match State: {:?}", match_state);
-                    println!("Transitions: {:?}", transitions);
-
                     if let Some(target_state) = transitions.get_start_anchor_assertion_target() {
                         if match_state.is_start_of_line_next {
                             let new_state = MatchState {
@@ -207,7 +198,6 @@ impl Lexer {
 
                     if let Some(target_state) = transitions.get_word_boundry_assertion_target() {
                         if is_word_boundary(prev_char_opt_for_boundary, char_at_lookahead_pos_opt) {
-                            println!("Word Boundry Added");
                             let new_state = MatchState {
                                 dfa_state: *target_state,
                                 matched_len: match_state.matched_len,
@@ -233,7 +223,6 @@ impl Lexer {
                     if let Some(ch_to_consume) = char_at_lookahead_pos_opt {
                         let next_range_state_id_opt =
                             next_range_state(ch_to_consume, transitions.get_range_transitions());
-                        println!("Next Range: {:?}", next_range_state_id_opt);
                         if let Some(next_dfa_state) = next_range_state_id_opt {
                             let ch_len = ch_to_consume.len_utf8();
                             let new_matched_len = match_state.matched_len + ch_len;
@@ -245,7 +234,6 @@ impl Lexer {
                                 .get(&next_dfa_state)
                                 .cloned();
                             if accept_name.is_some() {
-                                println!("New Length: {}", new_matched_len);
                                 if new_matched_len > best_match_len {
                                     best_match_len = new_matched_len
                                 }
@@ -275,8 +263,6 @@ impl Lexer {
 
                 active_match_states = next_active_match_states;
 
-                println!("Active match states: {:?}", active_match_states);
-
                 let viable_accepts = match possible_consume_accepts.is_empty() {
                     true => possible_no_consume_accepts,
                     false => {
@@ -284,8 +270,6 @@ impl Lexer {
                         possible_consume_accepts
                     }
                 };
-
-                println!("Viable Accepts: {:?}", viable_accepts);
 
                 for accept in viable_accepts {
                     let current_priority =
@@ -306,13 +290,8 @@ impl Lexer {
                         None => Some(accept),
                     };
                 }
-                println!(
-                    "Best match so far: {:?} at length {:?}",
-                    best_match_token_name, best_match_len
-                );
 
                 if let Some(ch_to_consume) = char_iter.next() {
-                    println!("Consume Character: {:?}", ch_to_consume);
                     consumed_chars_for_lookahead.push(ch_to_consume);
 
                     if active_match_states.is_empty() {
@@ -323,16 +302,11 @@ impl Lexer {
                 }
             }
 
-            println!("Accepted Token: {:?}", best_match_token_name);
-            println!("Accepted Token at row:{} col:{}", current_row, current_col);
-            println!("Unclosed Pairs: {:?}", unclosed_pairs);
-
             // --- Finalize Token ---
             if best_match_len > 0 {
                 let matched_len = best_match_len;
                 let token_name = best_match_token_name.unwrap();
                 let matched_text = &remaining_text[..matched_len];
-                println!("Token match: {:?}", matched_text);
                 let initial_token_row = current_row;
                 let initial_token_col = current_col;
                 for ch in matched_text.chars() {
@@ -387,8 +361,6 @@ impl Lexer {
                             break;
                         }
                     }
-
-                    println!("End Match length: {:?}", end_match_len);
 
                     if end_match_len > 0 {
                         current_pos = temp_ignore_lookahead_pos;
@@ -464,8 +436,6 @@ fn is_word_boundary(prev_char_opt: Option<char>, current_char_opt: Option<char>)
 }
 
 fn next_range_state(ch: char, ranges: &Vec<((char, char), StateId)>) -> Option<StateId> {
-    println!("char: {:?}", ch);
-    println!("Ranges: {:?}", ranges);
     let result = ranges.binary_search_by(|((low, high), _target_state)| {
         if ch < *low {
             std::cmp::Ordering::Greater
@@ -475,8 +445,6 @@ fn next_range_state(ch: char, ranges: &Vec<((char, char), StateId)>) -> Option<S
             std::cmp::Ordering::Equal
         }
     });
-
-    println!("Result: {:?}", result);
 
     match result {
         Ok(index) => Some(ranges[index].1),
