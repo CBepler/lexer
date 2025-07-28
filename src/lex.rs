@@ -235,6 +235,9 @@ impl Lexer {
                                 .get(&next_dfa_state)
                                 .cloned();
                             if accept_name.is_some() {
+                                if new_matched_len > best_match_len {
+                                    best_match_len = new_matched_len
+                                }
                                 possible_consume_accepts.push(accept_name.unwrap());
                             }
                             let new_state = MatchState {
@@ -263,7 +266,6 @@ impl Lexer {
                 let viable_accepts = match possible_consume_accepts.is_empty() {
                     true => possible_no_consume_accepts,
                     false => {
-                        best_match_len += 1;
                         best_match_token_name = Some(possible_consume_accepts.remove(0));
                         possible_consume_accepts
                     }
@@ -296,6 +298,7 @@ impl Lexer {
                 );
 
                 if let Some(ch_to_consume) = char_iter.next() {
+                    println!("Consume Character: {:?}", ch_to_consume);
                     consumed_chars_for_lookahead.push(ch_to_consume);
 
                     if active_match_states.is_empty() {
