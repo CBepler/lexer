@@ -235,6 +235,7 @@ impl Lexer {
                                 .get(&next_dfa_state)
                                 .cloned();
                             if accept_name.is_some() {
+                                println!("New Length: {}", new_matched_len);
                                 if new_matched_len > best_match_len {
                                     best_match_len = new_matched_len
                                 }
@@ -253,6 +254,9 @@ impl Lexer {
                                 .get(&match_state.dfa_state)
                                 .cloned();
                             if accept_name.is_some() {
+                                if match_state.matched_len > best_match_len {
+                                    best_match_len = match_state.matched_len;
+                                }
                                 possible_no_consume_accepts.push(accept_name.unwrap());
                             }
                         }
@@ -310,6 +314,7 @@ impl Lexer {
             }
 
             println!("Accepted Token: {:?}", best_match_token_name);
+            println!("Accepted Token at row:{} col:{}", current_row, current_col);
             println!("Unclosed Pairs: {:?}", unclosed_pairs);
 
             // --- Finalize Token ---
@@ -928,5 +933,23 @@ mod tests {
         assert_eq!(tokens[3].get_name(), "SEMICOLON");
         assert_eq!(tokens[3].get_row(), 2);
         assert_eq!(tokens[3].get_col(), 6);
+    }
+
+    #[test]
+    fn lexer_greedy_test() {
+        let language = define_language! {
+            keyword!("BOOK", r"book", 100),
+            keyword!("BOOKED", r"booked", 100),
+            keyword!("E", r"e", 100),
+        };
+        let lexer = Lexer::new(language.unwrap()).unwrap();
+        let input = "booke";
+        let tokens = lexer.lex(input).unwrap();
+
+        println!("{:?}", tokens);
+
+        assert_eq!(tokens[0].get_name(), "BOOK");
+
+        assert_eq!(tokens[1].get_name(), "E");
     }
 }
