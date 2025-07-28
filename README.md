@@ -151,9 +151,19 @@ Note that while the regular expression suports the full unicode character set, t
 
 ### Tokens
 
-A lexer is created by caller `Lexer::new(language)`. This will create the dfa for that language and then you can lex with `lexer.lex(text)`. The lex method returns a `Result<Vec<Token>, String>`. Tokens have 4 fields:
+A lexer is created by calling `Lexer::new(language)`. This will create the dfa for that language and then you can lex with `lexer.lex(text)`. The lex method returns a `Result<Vec<Token>, String>`. Tokens have 4 fields:
 
 * `name`: `String` #The token name
 * `text_match`: `Option<String>` #The matching text if store is enabled
 * `row`: `usize` #The row in the text of the token
 * `col`: `usize` #The column in the text of the token
+
+### Lexing
+
+Below is an example of lexing text:
+
+```rust
+    let lexer = Lexer::new(language.unwrap()).unwrap();
+    let input_string = "(1 + 2.5) * 3";
+    let tokens_result = lexer.lex(input_string);
+```
