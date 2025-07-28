@@ -1,4 +1,4 @@
-//! # lexer
+//! # lexit
 //!
 //! A configurable and robust lexical analyzer (lexer) library for Rust.
 //!
@@ -10,7 +10,7 @@
 //!
 //! ## Getting Started
 //!
-//! Add `lexer` to your project with `cargo add lexer`
+//! Add `lexit` to your project with `cargo add lexit`
 //!
 //! ## Defining a language
 //!

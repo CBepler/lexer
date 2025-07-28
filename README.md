@@ -1,4 +1,4 @@
-### `lexer`
+### `lexit`
 
 A configurable and robust lexical analyzer (lexer) library for Rust. This crate provides a powerful macro-based approach to defining programming language lexers with support for keywords, operators, identifiers, literals, whitespace, and comments, including intricate features like paired delimiters and multi-line comments.
 
@@ -6,7 +6,7 @@ A configurable and robust lexical analyzer (lexer) library for Rust. This crate 
 
 ### Getting Started
 
-Add lexer to your project with `cargo add lexer`
+Add lexit to your project with `cargo add lexit`
 
 ### Defining a language
 
