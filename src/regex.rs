@@ -1,31 +1,63 @@
+//! This module provides a custom regular expression engine used for lexing.
+//! It defines the structure of parsed regular expression patterns and includes
+//! the logic for parsing a regex string into this structured representation.
+
 use escapes::EscapeChar;
 use std::iter::Peekable;
 
 pub mod escapes;
 
+/// Represents the different types of parsed regular expression patterns.
+///
+/// This enum covers literals, quantifiers, character ranges, groups,
+/// concatenations, alternations, anchors, and escape characters.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RegexPattern {
+    /// A literal character that must be matched exactly.
     Literal(char),
+    /// A quantified pattern, specifying minimum and optional maximum occurrences.
+    ///
+    /// The `Option<usize>` for max can be `None` for unbounded (`*` or `+`).
     Quantifier(Box<RegexPattern>, usize, Option<usize>),
+    /// A character range that matches any character *not* within the specified ranges.
     NotRange(Vec<RangeType>),
+    /// A grouping of patterns, treated as a single unit for quantification or alternation.
     Group(Box<RegexPattern>),
+    /// A character range that matches any character within the specified ranges.
     Range(Vec<RangeType>),
+    /// A sequence of patterns that must match consecutively.
     Concatenation(Vec<Box<RegexPattern>>),
+    /// A choice between multiple patterns; any one of them can match.
     Alternation(Vec<Box<RegexPattern>>),
+    /// Matches the start of a line (`^`).
     StartAnchor,
+    /// Matches the end of a line (`$`).
     EndAnchor,
+    /// Matches any single character (except newline, typically, though this implementation might vary).
     AnyCharacter,
+    /// An escape character like `\d`, `\s`, `\w`, or `\b`.
     EscapeChar(EscapeChar),
 }
 
+/// Defines the types of elements that can be part of a character range (`[]`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RangeType {
+    /// A single literal character (e.g., `a` in `[abc]`).
     SingleChar(char),
+    /// A range between two characters (inclusive) (e.g., `a-z` in `[a-z]`).
     MultiChar(char, char),
+    /// A single escape character like `\d`, `\s`, or `\w` within a range (e.g., `\d` in `[\d]`).
     SingleEscape(EscapeChar),
 }
 
 impl RangeType {
+    /// Checks if the `RangeType` contains the given character.
+    ///
+    /// # Arguments
+    /// * `c`: The character to check.
+    ///
+    /// # Returns
+    /// `true` if the character is within the range defined by `self`, `false` otherwise.
     pub fn contains(&self, c: char) -> bool {
         match self {
             RangeType::SingleChar(ch) => *ch == c,
@@ -35,6 +67,8 @@ impl RangeType {
     }
 }
 
+/// Represents a parsed regular expression, holding its structured pattern
+/// and the original string input.
 #[derive(Debug, PartialEq)]
 pub struct Regex {
     pattern: RegexPattern,
@@ -42,6 +76,31 @@ pub struct Regex {
 }
 
 impl Regex {
+    /// Parses a regular expression string into a `Regex` structure.
+    ///
+    /// This function acts as the entry point for the regex parsing logic.
+    ///
+    /// # Arguments
+    /// * `text`: The regular expression string to parse.
+    ///
+    /// # Returns
+    /// A `Result` indicating either the successfully parsed `Regex` or a `String`
+    /// error message if parsing fails.
+    ///
+    /// # Examples
+    /// ```
+    /// use lexer::regex::{Regex, RegexPattern, escapes::EscapeChar};
+    /// use lexer::regex::RegexPattern::{Literal, Concatenation, EscapeChar as RegexEscapeChar};
+    ///
+    /// let reg = Regex::new(r"a\d").unwrap();
+    /// assert_eq!(reg.get_pattern(), &Concatenation(vec![
+    ///     Box::new(Literal('a')),
+    ///     Box::new(RegexEscapeChar(EscapeChar::Digit))
+    /// ]));
+    ///
+    /// let err = Regex::new(r"(a").unwrap_err();
+    /// assert!(err.contains("Unclosed group"));
+    /// ```
     pub fn new(text: &str) -> Result<Self, String> {
         let mut text_iter = text.chars().into_iter().peekable();
         let pattern = parse_expression(&mut text_iter)?;
@@ -54,10 +113,14 @@ impl Regex {
         }
     }
 
+    /// Returns a reference to the parsed `RegexPattern`.
+    ///
+    /// This allows inspection of the internal structure of the parsed regex.
     pub fn get_pattern(&self) -> &RegexPattern {
         &self.pattern
     }
 
+    /// Returns a reference to the original string from which the regex was parsed.
     pub fn to_string(&self) -> &str {
         &self.original_string
     }

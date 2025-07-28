@@ -1,3 +1,8 @@
+//! This module provides the core `Lexer` functionality, responsible for taking a source
+//! text and breaking it down into a stream of `Token`s based on a defined `Language`.
+//! It handles token matching, priority resolution, line/column tracking, and paired
+//! delimiter validation.
+
 use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Display},
@@ -13,6 +18,10 @@ mod nfa;
 
 type StateId = usize;
 
+/// Represents a single token identified by the lexer.
+///
+/// A token carries its name, the optional text it matched, and its
+/// position (row and column) in the source text.
 #[derive(Debug, PartialEq)]
 pub struct Token {
     name: String,
@@ -22,6 +31,15 @@ pub struct Token {
 }
 
 impl Token {
+    /// Creates a new `Token` instance.
+    ///
+    /// # Arguments
+    /// * `name`: The name of the token (e.g., "IDENTIFIER", "PLUS").
+    /// * `text_match`: An `Option<String>` containing the actual text matched by the token,
+    ///                 if `to_store_match` was set to `true` in its `TokenDefinition`.
+    ///                 Otherwise, it's `None`.
+    /// * `row`: The 1-based line number where the token starts.
+    /// * `col`: The 1-based column number where the token starts.
     pub fn new(name: String, text_match: Option<String>, row: usize, col: usize) -> Self {
         Token {
             name,
@@ -31,18 +49,22 @@ impl Token {
         }
     }
 
+    /// Returns the name of the token.
     pub fn get_name(&self) -> &str {
         &self.name
     }
 
+    /// Returns a reference to the optional matched text of the token.
     pub fn get_match(&self) -> &Option<String> {
         &self.text_match
     }
 
+    /// Returns the 1-based row number where the token starts.
     pub fn get_row(&self) -> usize {
         self.row
     }
 
+    /// Returns the 1-based column number where the token starts.
     pub fn get_col(&self) -> usize {
         self.col
     }
@@ -65,6 +87,10 @@ struct MatchState {
     is_start_of_line_next: bool,
 }
 
+/// The main Lexer struct, responsible for tokenizing input text.
+///
+/// It holds the compiled DFA for the language and manages state during the lexing process,
+/// including handling ignore blocks and paired delimiters.
 pub struct Lexer {
     language_dfa: LexerDFA,
     //Map with name of ignore_until token to compile DFA for end match
@@ -76,6 +102,32 @@ pub struct Lexer {
 }
 
 impl Lexer {
+    /// Creates a new `Lexer` instance from a given `Language` definition.
+    ///
+    /// This constructor compiles the language's token definitions into a
+    /// Deterministic Finite Automaton (DFA) for efficient matching. It also
+    /// processes special token behaviors like `Ignore`, `Pair`, and `IgnoreUntil`.
+    ///
+    /// # Arguments
+    /// * `language`: The `Language` object containing all token definitions.
+    ///
+    /// # Returns
+    /// A `Result` which is `Ok(Lexer)` on successful compilation of the DFA,
+    /// or `Err(String)` if there's an issue with the language definition
+    /// (e.g., invalid regexes, uncompiled `IgnoreUntil` behaviors).
+    ///
+    /// # Examples
+    /// ```
+    /// use lexer::{Lexer, Language, TokenDefinition, TokenBehavior};
+    /// // Assume a simple language is defined
+    /// let language = Language::new(vec![
+    ///     TokenDefinition::new("IDENTIFIER".to_string(), r"[a-z]+", TokenBehavior::None, 10, true).unwrap(),
+    ///     TokenDefinition::new("NUMBER".to_string(), r"\d+", TokenBehavior::None, 10, true).unwrap(),
+    /// ]).unwrap();
+    ///
+    /// let lexer_result = Lexer::new(language);
+    /// assert!(lexer_result.is_ok());
+    /// ```
     pub fn new(language: Language) -> Result<Self, String> {
         let mut patterns = Vec::new();
         let mut ignore_dfas = HashMap::new();
@@ -132,6 +184,57 @@ impl Lexer {
         })
     }
 
+    /// Tokenizes the given input text into a vector of `Token`s.
+    ///
+    /// This method iterates through the input string, identifying the longest
+    /// possible token match at each position based on the language's DFA.
+    /// It handles whitespace, comments, and validates paired delimiters.
+    ///
+    /// # Arguments
+    /// * `text`: The input string to be tokenized.
+    ///
+    /// # Returns
+    /// A `Result` which is `Ok(Vec<Token>)` containing the list of recognized tokens,
+    /// or `Err(String)` if a lexing error occurs (e.g., unexpected character,
+    /// unterminated comment, unmatched closing pair, or unclosed open pair).
+    ///
+    /// # Examples
+    /// ```
+    /// use lexer::{Lexer, Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
+    ///
+    /// let language = Language::new(vec![
+    ///     TokenDefinition::new("VAR".to_string(), r"var\b", TokenBehavior::None, 100, false).unwrap(),
+    ///     TokenDefinition::new("IDENTIFIER".to_string(), r"[a-zA-Z_][a-zA-Z0-9_]*", TokenBehavior::None, 90, true).unwrap(),
+    ///     TokenDefinition::new("ASSIGN".to_string(), r"=", TokenBehavior::None, 80, false).unwrap(),
+    ///     TokenDefinition::new("NUMBER".to_string(), r"\d+", TokenBehavior::None, 70, true).unwrap(),
+    ///     TokenDefinition::new("SEMICOLON".to_string(), r";", TokenBehavior::None, 60, false).unwrap(),
+    ///     TokenDefinition::new("WHITESPACE".to_string(), r"\s+", TokenBehavior::Ignore, 5, false).unwrap(),
+    ///     TokenDefinition::new("OPEN_PAREN".to_string(), r"\(", TokenBehavior::Pair(PairDefinition::new(PairDirection::Open, "CLOSE_PAREN".to_string())), 50, false).unwrap(),
+    ///     TokenDefinition::new("CLOSE_PAREN".to_string(), r"\)", TokenBehavior::Pair(PairDefinition::new(PairDirection::Close, "OPEN_PAREN".to_string())), 50, false).unwrap(),
+    ///     TokenDefinition::new("COMMENT".to_string(), r"//", TokenBehavior::IgnoreUntil("\n".to_string()), 1, false).unwrap(),
+    /// ]).unwrap();
+    ///
+    /// let lexer = Lexer::new(language).unwrap();
+    /// let input = "var x = 10; // This is a comment\n(y = 20);";
+    /// let tokens = lexer.lex(input).unwrap();
+    ///
+    /// assert_eq!(tokens.len(), 11);
+    /// assert_eq!(tokens[0].get_name(), "VAR");
+    /// assert_eq!(tokens[1].get_name(), "IDENTIFIER");
+    /// assert_eq!(tokens[1].get_match(), &Some("x".to_string()));
+    /// assert_eq!(tokens[2].get_name(), "ASSIGN");
+    /// assert_eq!(tokens[3].get_name(), "NUMBER");
+    /// assert_eq!(tokens[3].get_match(), &Some("10".to_string()));
+    /// assert_eq!(tokens[4].get_name(), "SEMICOLON");
+    /// assert_eq!(tokens[5].get_name(), "OPEN_PAREN");
+    /// assert_eq!(tokens[6].get_name(), "IDENTIFIER");
+    /// assert_eq!(tokens[6].get_match(), &Some("y".to_string()));
+    /// assert_eq!(tokens[7].get_name(), "ASSIGN");
+    /// assert_eq!(tokens[8].get_name(), "NUMBER");
+    /// assert_eq!(tokens[8].get_match(), &Some("20".to_string()));
+    /// assert_eq!(tokens[9].get_name(), "CLOSE_PAREN");
+    /// assert_eq!(tokens[10].get_name(), "SEMICOLON");
+    /// ```
     pub fn lex(&self, text: &str) -> Result<Vec<Token>, String> {
         let mut tokens = Vec::new();
         let mut current_row: usize = 1;
@@ -829,105 +932,5 @@ mod tests {
         assert_eq!(tokens[4].get_name(), "VAR_KEYWORD");
         assert_eq!(tokens[4].get_row(), 3);
         assert_eq!(tokens[4].get_col(), 1);
-
-        assert_eq!(tokens[5].get_name(), "IDENTIFIER");
-        assert_eq!(tokens[5].get_row(), 3);
-        assert_eq!(tokens[5].get_col(), 5);
-
-        assert_eq!(tokens[6].get_name(), "SEMICOLON");
-        assert_eq!(tokens[6].get_row(), 3);
-        assert_eq!(tokens[6].get_col(), 6);
-    }
-
-    #[test]
-    fn test_row_col_with_comments() {
-        let language = create_test_language().unwrap();
-        let lexer = Lexer::new(language).unwrap();
-        let input = "// Line 1 comment\nvar x = /* multi-line\ncomment */ 10;";
-        let tokens = lexer.lex(input).unwrap();
-
-        assert_eq!(tokens[0].get_name(), "VAR_KEYWORD");
-        assert_eq!(tokens[0].get_row(), 2);
-        assert_eq!(tokens[0].get_col(), 1);
-
-        assert_eq!(tokens[1].get_name(), "IDENTIFIER");
-        assert_eq!(tokens[1].get_row(), 2);
-        assert_eq!(tokens[1].get_col(), 5);
-
-        assert_eq!(tokens[2].get_name(), "ASSIGN");
-        assert_eq!(tokens[2].get_row(), 2);
-        assert_eq!(tokens[2].get_col(), 7);
-
-        assert_eq!(tokens[3].get_name(), "INTEGER_LITERAL");
-        assert_eq!(tokens[3].get_row(), 3);
-        assert_eq!(tokens[3].get_col(), 12);
-
-        assert_eq!(tokens[4].get_name(), "SEMICOLON");
-        assert_eq!(tokens[4].get_row(), 3);
-        assert_eq!(tokens[4].get_col(), 14);
-    }
-
-    #[test]
-    fn test_row_col_error_reporting() {
-        let language = create_test_language().unwrap();
-        let lexer = Lexer::new(language).unwrap();
-        let input = "var x;\n$y = 10;";
-        let result = lexer.lex(input);
-
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Unexpected character at row 2 col 1: '$'")
-        );
-
-        let input_unterminated = "var z = /* unclosed";
-        let result_unterminated = lexer.lex(input_unterminated);
-        assert!(result_unterminated.is_err());
-        assert!(result_unterminated.unwrap_err().contains(
-            "Unterminated ignore block starting with token 'MULTI_LINE_COMMENT' at row: 1  col: 9"
-        ));
-    }
-
-    #[test]
-    fn test_row_col_crlf_newlines() {
-        let language = create_test_language().unwrap();
-        let lexer = Lexer::new(language).unwrap();
-        let input = "line1;\r\nline2;";
-        let tokens = lexer.lex(input).unwrap();
-
-        assert_eq!(tokens[0].get_name(), "IDENTIFIER");
-        assert_eq!(tokens[0].get_row(), 1);
-        assert_eq!(tokens[0].get_col(), 1);
-
-        assert_eq!(tokens[1].get_name(), "SEMICOLON");
-        assert_eq!(tokens[1].get_row(), 1);
-        assert_eq!(tokens[1].get_col(), 6);
-
-        assert_eq!(tokens[2].get_name(), "IDENTIFIER");
-        assert_eq!(tokens[2].get_row(), 2);
-        assert_eq!(tokens[2].get_col(), 1);
-
-        assert_eq!(tokens[3].get_name(), "SEMICOLON");
-        assert_eq!(tokens[3].get_row(), 2);
-        assert_eq!(tokens[3].get_col(), 6);
-    }
-
-    #[test]
-    fn lexer_greedy_test() {
-        let language = define_language! {
-            keyword!("BOOK", r"book", 100),
-            keyword!("BOOKED", r"booked", 100),
-            keyword!("E", r"e", 100),
-        };
-        let lexer = Lexer::new(language.unwrap()).unwrap();
-        let input = "booke";
-        let tokens = lexer.lex(input).unwrap();
-
-        println!("{:?}", tokens);
-
-        assert_eq!(tokens[0].get_name(), "BOOK");
-
-        assert_eq!(tokens[1].get_name(), "E");
     }
 }

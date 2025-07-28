@@ -1,3 +1,5 @@
+//! This module provides the Language struct used to represent a lexable language
+
 use std::collections::HashSet;
 
 pub use token_definition::{
@@ -13,12 +15,77 @@ use super::*;
 
 pub mod token_definition;
 
+/// Represents a defined programming language, containing a collection of token definitions
+/// and enforcing rules for valid language construction, especially concerning paired tokens.
 #[derive(Debug)]
 pub struct Language {
+    /// A vector of `TokenDefinition` instances that make up the language.
     pub token_definitions: Vec<TokenDefinition>,
 }
 
 impl Language {
+    /// Creates a new `Language` instance from a vector of `TokenDefinition`s.
+    ///
+    /// This constructor performs validation to ensure:
+    /// 1. There are no duplicate token names.
+    /// 2. All paired tokens (e.g., parentheses, braces) have their counterparts correctly defined
+    ///    as either an `Open` or `Close` pair.
+    ///
+    /// # Arguments
+    /// * `tokens`: A `Vec<TokenDefinition>` representing the tokens of the language.
+    ///
+    /// # Returns
+    /// A `Result` which is `Ok(Language)` if all validations pass, or `Err(String)`
+    /// with an error message if there's a duplicate token name or a paired token mismatch.
+    ///
+    /// # Examples
+    /// ```
+    /// use lexer::language::{Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
+    ///
+    /// // Example of valid tokens
+    /// let ok_tokens = vec![
+    ///     TokenDefinition::new("KEYWORD".to_string(), "keyword", TokenBehavior::None, 10, false).unwrap(),
+    ///     TokenDefinition::new(
+    ///         "OPEN_PAREN".to_string(),
+    ///         r"\(",
+    ///         TokenBehavior::Pair(PairDefinition::new(PairDirection::Open, "CLOSE_PAREN".to_string())),
+    ///         20,
+    ///         false,
+    ///     ).unwrap(),
+    ///     TokenDefinition::new(
+    ///         "CLOSE_PAREN".to_string(),
+    ///         r"\)",
+    ///         TokenBehavior::Pair(PairDefinition::new(PairDirection::Close, "OPEN_PAREN".to_string())),
+    ///         20,
+    ///         false,
+    ///     ).unwrap(),
+    /// ];
+    /// let language_result = Language::new(ok_tokens);
+    /// assert!(language_result.is_ok());
+    ///
+    /// // Example of duplicate token name
+    /// let duplicate_tokens = vec![
+    ///     TokenDefinition::new("DUPLICATE".to_string(), "dup", TokenBehavior::None, 10, false).unwrap(),
+    ///     TokenDefinition::new("DUPLICATE".to_string(), "dup2", TokenBehavior::None, 10, false).unwrap(),
+    /// ];
+    /// let error_result = Language::new(duplicate_tokens);
+    /// assert!(error_result.is_err());
+    /// assert!(error_result.unwrap_err().contains("Duplicate token name"));
+    ///
+    /// // Example of missing counterpart
+    /// let missing_counterpart = vec![
+    ///     TokenDefinition::new(
+    ///         "OPEN_BRACE".to_string(),
+    ///         r"\{",
+    ///         TokenBehavior::Pair(PairDefinition::new(PairDirection::Open, "MISSING_BRACE".to_string())),
+    ///         20,
+    ///         false,
+    ///     ).unwrap(),
+    /// ];
+    /// let error_result_pair = Language::new(missing_counterpart);
+    /// assert!(error_result_pair.is_err());
+    /// assert!(error_result_pair.unwrap_err().contains("not defined as a close pair"));
+    /// ```
     pub fn new(tokens: Vec<TokenDefinition>) -> Result<Self, String> {
         let mut token_names = HashSet::new();
         let mut open_pair_names = HashSet::new();
@@ -58,6 +125,37 @@ impl Language {
         })
     }
 
+    /// Creates a new `Language` instance from a vector of `Result<TokenDefinition, String>`.
+    ///
+    /// This is a convenience constructor that first collects all successful `TokenDefinition`s
+    /// and propagates any `Err` results from the token creation process.
+    /// After collecting, it then calls `Language::new` to perform the final language validation.
+    ///
+    /// # Arguments
+    /// * `tokens`: A `Vec<Result<TokenDefinition, String>>` where each element is the result
+    ///             of attempting to create a `TokenDefinition`.
+    ///
+    /// # Returns
+    /// A `Result` which is `Ok(Language)` if all token definitions are successfully compiled
+    /// and the language validation passes. Otherwise, it returns `Err(String)` if any
+    /// token definition failed to compile or if the overall language structure is invalid.
+    ///
+    /// # Examples
+    /// ```
+    /// use lexer::language::{Language, TokenDefinition, TokenBehavior};
+    ///
+    /// let ok_results = vec![
+    ///     TokenDefinition::new("ID".to_string(), r"[a-z]+", TokenBehavior::None, 10, true),
+    ///     TokenDefinition::new("NUM".to_string(), r"[0-9]+", TokenBehavior::None, 10, true),
+    /// ];
+    /// assert!(Language::new_from_results(ok_results).is_ok());
+    ///
+    /// let error_results = vec![
+    ///     TokenDefinition::new("ID".to_string(), r"[a-z]+", TokenBehavior::None, 10, true),
+    ///     TokenDefinition::new("BAD_REGEX".to_string(), r"[", TokenBehavior::None, 10, false),
+    /// ];
+    /// assert!(Language::new_from_results(error_results).is_err());
+    /// ```
     pub fn new_from_results(tokens: Vec<Result<TokenDefinition, String>>) -> Result<Self, String> {
         let compiled_tokens: Vec<TokenDefinition> = tokens
             .into_iter()
@@ -65,6 +163,7 @@ impl Language {
         Language::new(compiled_tokens)
     }
 
+    /// Returns a reference to the vector of `TokenDefinition`s in this language.
     pub fn get_token_definitions(&self) -> &Vec<TokenDefinition> {
         &self.token_definitions
     }

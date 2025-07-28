@@ -18,6 +18,8 @@ Languages creation is streamlined with the "define_language!" macro and the smal
 * `close_pair!(token_name, regex, couterpart_name, priority)` #This is the counterpart to open pair. Likewise, the language will error if there is no matching open pair and the lexer will error if there is a random closing pair without matching open pair
 * `ignore_until!(token_name, regex, ending_regex, priority)` #This is generally used for comments. It says "When I match on regex, I will ignore all characters until I match on ending_regex, and then I will resume regular activity"
 
+Priority is only used when two tokens could match with the same length. The lexer uses maximal munch, so a longer length match will always have higher priority.
+
 Below is an example of defining a small subset of the C language:
 
 ```rust
@@ -145,7 +147,12 @@ In order to implement the dfa construction for lexing, I implemented my own regu
   * `\s`: ascii-whitespace
   * `\w`: ascii-word_character
 
-Note that while the regular expressions suport the full unicode character set, the escape characters \d, \s, and \w only work for ascii
+Note that while the regular expressions suport the full unicode character set, the escape characters \d, \s, and \w only work for ascii.
+
+Below are the matching characters for each of the three escape characters mentioned above:
+* \d: [0-9]
+* \s: [ \t\r\n\u{000C}]
+* \w: [a-zA-Z0-9_]
 
 ---
 
