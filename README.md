@@ -145,7 +145,7 @@ In order to implement the dfa construction for lexing, I implemented my own regu
   * `\s`: ascii-whitespace
   * `\w`: ascii-word_character
 
-Note that while the regular expression suports the full unicode character set, the escape characters only work for ascii
+Note that while the regular expressions suports the full unicode character set, the escape characters \d, \s, and \w only work for ascii
 
 ---
 

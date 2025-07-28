@@ -6,7 +6,6 @@ use std::{
 use crate::{
     language::{Language, PairDirection, TokenBehavior},
     lex::{dfa::LexerDFA, nfa::LexerNFA},
-    regex::escapes::EscapeChar,
 };
 
 mod dfa;
@@ -453,7 +452,7 @@ fn check_line_end_char(c_opt: Option<char>) -> bool {
 
 fn is_word_char(c_opt: Option<char>) -> bool {
     match c_opt {
-        Some(c) => EscapeChar::WordCharacter.matches_char(c),
+        Some(c) => c.is_alphanumeric() | (c == '_'),
         None => false,
     }
 }
