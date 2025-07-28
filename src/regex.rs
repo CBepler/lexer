@@ -809,4 +809,32 @@ mod tests {
         ])));
         assert_eq!(reg.get_pattern(), &ans);
     }
+
+    #[test]
+    fn regex_unicode_literal() {
+        let reg = get_reg("你好").unwrap();
+        let ans = Concatenation(vec![Box::new(Literal('你')), Box::new(Literal('好'))]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_unicode_range() {
+        let reg = get_reg("[α-ω]").unwrap();
+        let ans = Range(vec![MultiChar('α', 'ω')]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_not_unicode_range() {
+        let reg = get_reg("[^日本語]").unwrap();
+        let ans = NotRange(vec![SingleChar('日'), SingleChar('本'), SingleChar('語')]);
+        assert_eq!(reg.get_pattern(), &ans);
+    }
+
+    #[test]
+    fn regex_unicode_quantifier() {
+        let reg = get_reg("😊{2,5}").unwrap();
+        let ans = Quantifier(Box::new(Literal('😊')), 2, Some(5));
+        assert_eq!(reg.get_pattern(), &ans);
+    }
 }
