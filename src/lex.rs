@@ -13,6 +13,8 @@ type StateId = usize;
 pub struct Token {
     name: String,
     text_match: Option<String>,
+    row: usize,
+    col: usize,
 }
 
 impl Token {
@@ -22,6 +24,14 @@ impl Token {
 
     pub fn get_match(&self) -> &Option<String> {
         &self.text_match
+    }
+
+    pub fn get_row(&self) -> usize {
+        self.row
+    }
+
+    pub fn get_col(&self) -> usize {
+        self.col
     }
 }
 
@@ -107,6 +117,8 @@ impl Lexer {
 
     pub fn lex(&self, text: &str) -> Result<Vec<Token>, String> {
         let mut tokens = Vec::new();
+        let mut current_row: usize = 1;
+        let mut current_col: usize = 1;
         let mut current_pos: usize = 0;
         let mut unclosed_pairs: HashMap<String, u32> = HashMap::new();
 
@@ -290,6 +302,11 @@ impl Lexer {
                 let token_name = best_match_token_name.unwrap();
                 let matched_text = &remaining_text[..matched_len];
                 println!("Token match: {:?}", matched_text);
+                let initial_token_row = current_row;
+                let initial_token_col = current_col;
+                for ch in matched_text.chars() {
+                    (current_row, current_col) = update_row_col(ch, current_row, current_col)
+                }
 
                 if let Some(ignore_dfa) = self.ignore_dfas.get(&token_name) {
                     current_pos += matched_len;
@@ -314,7 +331,21 @@ impl Lexer {
                             current_ignore_dfa_state = next_state;
                         } else {
                             current_ignore_dfa_state = ignore_dfa.get_start_state();
+                            if let Some(trans_data_start) =
+                                ignore_dfa.get_state_transitions(ignore_dfa.get_start_state())
+                            {
+                                if let Some(next_start_state) = next_range_state(
+                                    ch_in_ignore,
+                                    trans_data_start.get_range_transitions(),
+                                ) {
+                                    current_ignore_dfa_state = next_start_state;
+                                }
+                            }
                         }
+
+                        (current_row, current_col) =
+                            update_row_col(ch_in_ignore, current_row, current_col);
+
                         temp_ignore_lookahead_pos += ch_in_ignore_len;
 
                         if ignore_dfa
@@ -332,9 +363,8 @@ impl Lexer {
                         current_pos = temp_ignore_lookahead_pos;
                     } else {
                         return Err(format!(
-                            "Unterminated ignore block starting with token '{}' at position {}",
-                            token_name,
-                            current_pos - matched_len
+                            "Unterminated ignore block starting with token '{}' at row: {}  col: {}",
+                            token_name, initial_token_row, initial_token_col
                         ));
                     }
                 } else if !self.ignores.contains(&token_name) {
@@ -351,8 +381,8 @@ impl Lexer {
                             .or_insert(0);
                         if num_open <= 0 {
                             return Err(format!(
-                                "Unexpected closing pair found without matching open at position {}, '{}'",
-                                current_pos, token_name,
+                                "Unexpected closing pair found without matching open at row: {} col: {} : '{}'",
+                                initial_token_row, initial_token_col, token_name,
                             ));
                         }
                         *unclosed_pairs
@@ -362,6 +392,8 @@ impl Lexer {
                     tokens.push(Token {
                         name: token_name,
                         text_match: text_to_store,
+                        row: initial_token_row,
+                        col: initial_token_col,
                     });
                     current_pos += matched_len;
                 } else {
@@ -370,8 +402,8 @@ impl Lexer {
             } else {
                 let char_at_error = text[current_pos..].chars().next().unwrap_or(' ');
                 return Err(format!(
-                    "Unexpected character at position {}: '{}'",
-                    current_pos, char_at_error
+                    "Unexpected character at row {} col {}: '{}'",
+                    current_row, current_col, char_at_error
                 ));
             }
         }
@@ -418,6 +450,16 @@ fn next_range_state(ch: char, ranges: &Vec<((char, char), StateId)>) -> Option<S
     match result {
         Ok(index) => Some(ranges[index].1),
         Err(_) => None,
+    }
+}
+
+fn update_row_col(ch: char, row: usize, col: usize) -> (usize, usize) {
+    if ch == '\n' {
+        (row + 1, 1)
+    } else if ch == '\r' {
+        (row, col)
+    } else {
+        (row, col + 1)
     }
 }
 
@@ -477,6 +519,17 @@ mod tests {
         assert_eq!(tokens[3].get_name(), "INTEGER_LITERAL");
         assert_eq!(tokens[3].get_match(), &Some("123".to_string()));
         assert_eq!(tokens[4].get_name(), "SEMICOLON");
+
+        assert_eq!(tokens[0].get_row(), 1);
+        assert_eq!(tokens[0].get_col(), 1);
+        assert_eq!(tokens[1].get_row(), 1);
+        assert_eq!(tokens[1].get_col(), 5);
+        assert_eq!(tokens[2].get_row(), 1);
+        assert_eq!(tokens[2].get_col(), 11);
+        assert_eq!(tokens[3].get_row(), 1);
+        assert_eq!(tokens[3].get_col(), 13);
+        assert_eq!(tokens[4].get_row(), 1);
+        assert_eq!(tokens[4].get_col(), 16);
     }
 
     #[test]
@@ -497,6 +550,26 @@ mod tests {
         assert_eq!(tokens[3].get_name(), "INTEGER_LITERAL");
         assert_eq!(tokens[3].get_match(), &Some("456".to_string()));
         assert_eq!(tokens[4].get_name(), "SEMICOLON");
+
+        assert_eq!(tokens[0].get_name(), "VAR_KEYWORD");
+        assert_eq!(tokens[0].get_row(), 3);
+        assert_eq!(tokens[0].get_col(), 13);
+
+        assert_eq!(tokens[1].get_name(), "IDENTIFIER");
+        assert_eq!(tokens[1].get_row(), 3);
+        assert_eq!(tokens[1].get_col(), 42);
+
+        assert_eq!(tokens[2].get_name(), "ASSIGN");
+        assert_eq!(tokens[2].get_row(), 3);
+        assert_eq!(tokens[2].get_col(), 53);
+
+        assert_eq!(tokens[3].get_name(), "INTEGER_LITERAL");
+        assert_eq!(tokens[3].get_row(), 3);
+        assert_eq!(tokens[3].get_col(), 55);
+
+        assert_eq!(tokens[4].get_name(), "SEMICOLON");
+        assert_eq!(tokens[4].get_row(), 3);
+        assert_eq!(tokens[4].get_col(), 58);
     }
 
     #[test]
@@ -521,6 +594,22 @@ mod tests {
         assert_eq!(tokens[9].get_name(), "INTEGER_LITERAL");
         assert_eq!(tokens[10].get_name(), "SEMICOLON");
         assert_eq!(tokens[11].get_name(), "RIGHT_BRACE");
+
+        assert_eq!(tokens[2].get_name(), "LEFT_PAREN");
+        assert_eq!(tokens[2].get_row(), 1);
+        assert_eq!(tokens[2].get_col(), 12);
+
+        assert_eq!(tokens[6].get_name(), "RIGHT_PAREN");
+        assert_eq!(tokens[6].get_row(), 1);
+        assert_eq!(tokens[6].get_col(), 23);
+
+        assert_eq!(tokens[7].get_name(), "LEFT_BRACE");
+        assert_eq!(tokens[7].get_row(), 1);
+        assert_eq!(tokens[7].get_col(), 25);
+
+        assert_eq!(tokens[11].get_name(), "RIGHT_BRACE");
+        assert_eq!(tokens[11].get_row(), 1);
+        assert_eq!(tokens[11].get_col(), 37);
     }
 
     #[test]
@@ -546,11 +635,7 @@ mod tests {
         let result = lexer.lex(input);
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Unexpected closing pair found without matching open at position")
-        );
+        assert!(result.unwrap_err().contains("Unexpected closing pair"));
     }
 
     #[test]
@@ -561,17 +646,24 @@ mod tests {
         let result = lexer.lex(input);
 
         assert!(result.is_err());
+        assert!(result.unwrap_err().contains(
+            "Unterminated ignore block starting with token 'MULTI_LINE_COMMENT' at row: 1  col: 9"
+        ));
     }
 
     #[test]
     fn lexer_unrecognized_character_error() {
         let language = create_test_language().unwrap();
         let lexer = Lexer::new(language).unwrap();
-        let input = "var $x = 10;"; // '$' is not defined
+        let input = "var $x = 10;";
         let result = lexer.lex(input);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("'$'"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Unexpected character at row 1 col 5: '$'")
+        );
     }
 
     #[test]
@@ -613,6 +705,37 @@ mod tests {
         assert_eq!(tokens[6].get_match(), &Some("myVar".to_string()));
         assert_eq!(tokens[9].get_match(), &Some("2".to_string()));
         assert_eq!(tokens[11].get_match(), &Some("funcCall".to_string()));
+
+        assert_eq!(tokens[0].get_row(), 1);
+        assert_eq!(tokens[0].get_col(), 1);
+        assert_eq!(tokens[1].get_row(), 1);
+        assert_eq!(tokens[1].get_col(), 5);
+        assert_eq!(tokens[2].get_row(), 1);
+        assert_eq!(tokens[2].get_col(), 12);
+        assert_eq!(tokens[3].get_row(), 1);
+        assert_eq!(tokens[3].get_col(), 14);
+        assert_eq!(tokens[4].get_row(), 1);
+        assert_eq!(tokens[4].get_col(), 15);
+        assert_eq!(tokens[5].get_row(), 1);
+        assert_eq!(tokens[5].get_col(), 18);
+        assert_eq!(tokens[6].get_row(), 1);
+        assert_eq!(tokens[6].get_col(), 20);
+        assert_eq!(tokens[7].get_row(), 1);
+        assert_eq!(tokens[7].get_col(), 25);
+        assert_eq!(tokens[8].get_row(), 1);
+        assert_eq!(tokens[8].get_col(), 27);
+        assert_eq!(tokens[9].get_row(), 1);
+        assert_eq!(tokens[9].get_col(), 29);
+        assert_eq!(tokens[10].get_row(), 1);
+        assert_eq!(tokens[10].get_col(), 31);
+        assert_eq!(tokens[11].get_row(), 1);
+        assert_eq!(tokens[11].get_col(), 33);
+        assert_eq!(tokens[12].get_row(), 1);
+        assert_eq!(tokens[12].get_col(), 41);
+        assert_eq!(tokens[13].get_row(), 1);
+        assert_eq!(tokens[13].get_col(), 42);
+        assert_eq!(tokens[14].get_row(), 1);
+        assert_eq!(tokens[14].get_col(), 43);
     }
 
     #[test]
@@ -643,5 +766,151 @@ mod tests {
         assert_eq!(tokens4[0].get_name(), "RETURN_KEYWORD");
         assert_eq!(tokens4[1].get_name(), "INTEGER_LITERAL");
         assert_eq!(tokens4[2].get_name(), "SEMICOLON");
+    }
+
+    #[test]
+    fn test_row_col_simple_newline() {
+        let language = create_test_language().unwrap();
+        let lexer = Lexer::new(language).unwrap();
+        let input = "var x;\ny = 10;";
+        let tokens = lexer.lex(input).unwrap();
+
+        assert_eq!(tokens[0].get_name(), "VAR_KEYWORD");
+        assert_eq!(tokens[0].get_row(), 1);
+        assert_eq!(tokens[0].get_col(), 1);
+
+        assert_eq!(tokens[1].get_name(), "IDENTIFIER");
+        assert_eq!(tokens[1].get_row(), 1);
+        assert_eq!(tokens[1].get_col(), 5);
+
+        assert_eq!(tokens[2].get_name(), "SEMICOLON");
+        assert_eq!(tokens[2].get_row(), 1);
+        assert_eq!(tokens[2].get_col(), 6);
+
+        assert_eq!(tokens[3].get_name(), "IDENTIFIER");
+        assert_eq!(tokens[3].get_row(), 2);
+        assert_eq!(tokens[3].get_col(), 1);
+
+        assert_eq!(tokens[4].get_name(), "ASSIGN");
+        assert_eq!(tokens[4].get_row(), 2);
+        assert_eq!(tokens[4].get_col(), 3);
+
+        assert_eq!(tokens[5].get_name(), "INTEGER_LITERAL");
+        assert_eq!(tokens[5].get_row(), 2);
+        assert_eq!(tokens[5].get_col(), 5);
+
+        assert_eq!(tokens[6].get_name(), "SEMICOLON");
+        assert_eq!(tokens[6].get_row(), 2);
+        assert_eq!(tokens[6].get_col(), 7);
+    }
+
+    #[test]
+    fn test_row_col_multiple_newlines() {
+        let language = create_test_language().unwrap();
+        let lexer = Lexer::new(language).unwrap();
+        let input = "func a()\n\nvar b;";
+        let tokens = lexer.lex(input).unwrap();
+
+        assert_eq!(tokens[0].get_name(), "FUNC_KEYWORD");
+        assert_eq!(tokens[0].get_row(), 1);
+        assert_eq!(tokens[0].get_col(), 1);
+
+        assert_eq!(tokens[1].get_name(), "IDENTIFIER");
+        assert_eq!(tokens[1].get_row(), 1);
+        assert_eq!(tokens[1].get_col(), 6);
+
+        assert_eq!(tokens[2].get_name(), "LEFT_PAREN");
+        assert_eq!(tokens[2].get_row(), 1);
+        assert_eq!(tokens[2].get_col(), 7);
+
+        assert_eq!(tokens[3].get_name(), "RIGHT_PAREN");
+        assert_eq!(tokens[3].get_row(), 1);
+        assert_eq!(tokens[3].get_col(), 8);
+
+        assert_eq!(tokens[4].get_name(), "VAR_KEYWORD");
+        assert_eq!(tokens[4].get_row(), 3);
+        assert_eq!(tokens[4].get_col(), 1);
+
+        assert_eq!(tokens[5].get_name(), "IDENTIFIER");
+        assert_eq!(tokens[5].get_row(), 3);
+        assert_eq!(tokens[5].get_col(), 5);
+
+        assert_eq!(tokens[6].get_name(), "SEMICOLON");
+        assert_eq!(tokens[6].get_row(), 3);
+        assert_eq!(tokens[6].get_col(), 6);
+    }
+
+    #[test]
+    fn test_row_col_with_comments() {
+        let language = create_test_language().unwrap();
+        let lexer = Lexer::new(language).unwrap();
+        let input = "// Line 1 comment\nvar x = /* multi-line\ncomment */ 10;";
+        let tokens = lexer.lex(input).unwrap();
+
+        assert_eq!(tokens[0].get_name(), "VAR_KEYWORD");
+        assert_eq!(tokens[0].get_row(), 2);
+        assert_eq!(tokens[0].get_col(), 1);
+
+        assert_eq!(tokens[1].get_name(), "IDENTIFIER");
+        assert_eq!(tokens[1].get_row(), 2);
+        assert_eq!(tokens[1].get_col(), 5);
+
+        assert_eq!(tokens[2].get_name(), "ASSIGN");
+        assert_eq!(tokens[2].get_row(), 2);
+        assert_eq!(tokens[2].get_col(), 7);
+
+        assert_eq!(tokens[3].get_name(), "INTEGER_LITERAL");
+        assert_eq!(tokens[3].get_row(), 3);
+        assert_eq!(tokens[3].get_col(), 12);
+
+        assert_eq!(tokens[4].get_name(), "SEMICOLON");
+        assert_eq!(tokens[4].get_row(), 3);
+        assert_eq!(tokens[4].get_col(), 14);
+    }
+
+    #[test]
+    fn test_row_col_error_reporting() {
+        let language = create_test_language().unwrap();
+        let lexer = Lexer::new(language).unwrap();
+        let input = "var x;\n$y = 10;";
+        let result = lexer.lex(input);
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Unexpected character at row 2 col 1: '$'")
+        );
+
+        let input_unterminated = "var z = /* unclosed";
+        let result_unterminated = lexer.lex(input_unterminated);
+        assert!(result_unterminated.is_err());
+        assert!(result_unterminated.unwrap_err().contains(
+            "Unterminated ignore block starting with token 'MULTI_LINE_COMMENT' at row: 1  col: 9"
+        ));
+    }
+
+    #[test]
+    fn test_row_col_crlf_newlines() {
+        let language = create_test_language().unwrap();
+        let lexer = Lexer::new(language).unwrap();
+        let input = "line1;\r\nline2;";
+        let tokens = lexer.lex(input).unwrap();
+
+        assert_eq!(tokens[0].get_name(), "IDENTIFIER");
+        assert_eq!(tokens[0].get_row(), 1);
+        assert_eq!(tokens[0].get_col(), 1);
+
+        assert_eq!(tokens[1].get_name(), "SEMICOLON");
+        assert_eq!(tokens[1].get_row(), 1);
+        assert_eq!(tokens[1].get_col(), 6);
+
+        assert_eq!(tokens[2].get_name(), "IDENTIFIER");
+        assert_eq!(tokens[2].get_row(), 2);
+        assert_eq!(tokens[2].get_col(), 1);
+
+        assert_eq!(tokens[3].get_name(), "SEMICOLON");
+        assert_eq!(tokens[3].get_row(), 2);
+        assert_eq!(tokens[3].get_col(), 6);
     }
 }
