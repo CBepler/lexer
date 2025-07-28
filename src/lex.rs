@@ -23,6 +23,15 @@ pub struct Token {
 }
 
 impl Token {
+    pub fn new(name: String, text_match: Option<String>, row: usize, col: usize) -> Self {
+        Token {
+            name,
+            text_match,
+            row,
+            col,
+        }
+    }
+
     pub fn get_name(&self) -> &str {
         &self.name
     }
