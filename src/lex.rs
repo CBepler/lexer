@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::{self, Display},
+};
 
 use crate::{
     dfa::LexerDFA,
@@ -32,6 +35,16 @@ impl Token {
 
     pub fn get_col(&self) -> usize {
         self.col
+    }
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(text) = &self.text_match {
+            write!(f, "{}({})", self.name, text)
+        } else {
+            write!(f, "{}", self.name)
+        }
     }
 }
 
