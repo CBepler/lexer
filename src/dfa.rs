@@ -302,7 +302,7 @@ fn get_all_possible_dfa_transitions(
             let end = end_op.unwrap();
             if end >= next_start {
                 if end > next_end {
-                    if (next_start as u32) > (start as u32) {
+                    if next_start > start {
                         disjoint_transitions.insert(TransitionLabel::Range(
                             start,
                             char::from_u32((next_start as u32) - 1).unwrap(),
@@ -319,7 +319,7 @@ fn get_all_possible_dfa_transitions(
                         start_op = char::from_u32((next_start as u32) + 1);
                     }
                 } else {
-                    if (start as u32) - (next_start as u32) > 1 {
+                    if start > next_start {
                         disjoint_transitions.insert(TransitionLabel::Range(
                             start,
                             char::from_u32((next_start as u32) - 1).unwrap(),
