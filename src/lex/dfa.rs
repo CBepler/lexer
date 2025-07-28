@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use crate::{
-    nfa::{self, LexerNFA},
+    lex::nfa::{self, LexerNFA},
     regex::escapes::EscapeChar,
 };
 

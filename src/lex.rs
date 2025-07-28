@@ -4,11 +4,13 @@ use std::{
 };
 
 use crate::{
-    dfa::LexerDFA,
     language::{Language, PairDirection, TokenBehavior},
-    nfa::LexerNFA,
+    lex::{dfa::LexerDFA, nfa::LexerNFA},
     regex::escapes::EscapeChar,
 };
+
+mod dfa;
+mod nfa;
 
 type StateId = usize;
 
