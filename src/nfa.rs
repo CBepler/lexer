@@ -62,16 +62,23 @@ impl CharSetType {
         //Otherwise invert for negative range
         let mut negative_ranges = Vec::new();
         if reduced_char_ranges.first().unwrap().0 != '\0' {
-            negative_ranges.push(('\0', reduced_char_ranges.first().unwrap().0));
+            negative_ranges.push((
+                '\0',
+                char::from_u32((reduced_char_ranges.first().unwrap().0 as u32) - 1).unwrap(),
+            ));
         }
         let mut start = reduced_char_ranges.first().unwrap().1;
         for (next_start, next_end) in &reduced_char_ranges[1..] {
-            negative_ranges.push((start, *next_start));
+            negative_ranges.push((
+                char::from_u32(start as u32 + 1).unwrap(),
+                char::from_u32(*next_start as u32 - 1).unwrap(),
+            ));
             start = *next_end;
         }
         if start != '\u{10FFFF}' {
-            negative_ranges.push((start, '\u{10FFFF}'));
+            negative_ranges.push((char::from_u32(start as u32 + 1).unwrap(), '\u{10FFFF}'));
         }
+        println!("Negative Ranges: {:?}", negative_ranges);
         negative_ranges
     }
 }
