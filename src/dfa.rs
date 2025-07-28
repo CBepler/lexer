@@ -116,6 +116,7 @@ pub struct LexerDFA {
     start_state: StateId,
     transitions: HashMap<StateId, Transitions>,
     accept_states: HashMap<StateId, String>,
+    token_priorities: HashMap<String, i32>,
     next_state_id: StateId,
 }
 
@@ -139,6 +140,10 @@ impl LexerDFA {
     pub fn get_accept_states(&self) -> &HashMap<StateId, String> {
         &self.accept_states
     }
+
+    pub fn get_token_priority(&self, token: &str) -> Option<&i32> {
+        self.token_priorities.get(token)
+    }
 }
 
 struct DFAConstructor<'a> {
@@ -158,6 +163,7 @@ impl<'a> DFAConstructor<'a> {
         let mut unmarked_dfa_states_queue: VecDeque<StateId> = VecDeque::new();
         let mut dfa_transitions: HashMap<StateId, Transitions> = HashMap::new();
         let mut dfa_accept_states: HashMap<StateId, String> = HashMap::new();
+        let mut token_priorities = HashMap::new();
         let initial_nfa_closure: BTreeSet<StateId> = state_closures
             .get(nfa.get_start_state())
             .expect("NFA start state must have a closure")
@@ -187,7 +193,9 @@ impl<'a> DFAConstructor<'a> {
             }
             if !possible_accepts.is_empty() {
                 possible_accepts.sort_by(|a, b| b.1.cmp(&a.1));
-                dfa_accept_states.insert(current_dfa_state_id, possible_accepts.remove(0).0);
+                let highest_priority = possible_accepts.remove(0);
+                token_priorities.insert(highest_priority.0.clone(), highest_priority.1);
+                dfa_accept_states.insert(current_dfa_state_id, highest_priority.0);
             }
             let mut current_dfa_state_transitions: HashMap<TransitionLabel, StateId> =
                 HashMap::new();
@@ -242,6 +250,7 @@ impl<'a> DFAConstructor<'a> {
             start_state: dfa_start_state_id,
             transitions: dfa_transitions,
             accept_states: dfa_accept_states,
+            token_priorities,
             next_state_id: *self.next_state_id,
         })
     }
@@ -280,8 +289,17 @@ fn get_all_possible_dfa_transitions(
     transitions.sort_by_key(|range| (*range).0);
     let mut disjoint_transitions = BTreeSet::new();
     let mut range_iter = transitions.into_iter();
-    if let Some((mut start, mut end)) = range_iter.next() {
+    if let Some((first_start, first_end)) = range_iter.next() {
+        let mut start_op = Some(first_start);
+        let mut end_op = Some(first_end);
         while let Some((next_start, next_end)) = range_iter.next() {
+            if start_op == None {
+                start_op = Some(next_start);
+                end_op = Some(next_end);
+                continue;
+            }
+            let start = start_op.unwrap();
+            let end = end_op.unwrap();
             if end >= next_start {
                 if end > next_end {
                     if (next_start as u32) - (start as u32) > 1 {
@@ -291,17 +309,14 @@ fn get_all_possible_dfa_transitions(
                         ));
                     }
                     disjoint_transitions.insert(TransitionLabel::Range(next_start, next_end));
-                    let start_op = char::from_u32((next_end as u32) + 1);
-                    match start_op {
-                        Some(s) => start = s,
-                        None => break,
-                    }
+                    start_op = char::from_u32((next_end as u32) + 1);
                 } else if end == next_end {
-                    disjoint_transitions.insert(TransitionLabel::Range(start, next_start));
-                    let start_op = char::from_u32((next_start as u32) + 1);
-                    match start_op {
-                        Some(s) => start = s,
-                        None => break,
+                    if start == next_start {
+                        disjoint_transitions.insert(TransitionLabel::Range(start, end));
+                        start_op = None;
+                    } else {
+                        disjoint_transitions.insert(TransitionLabel::Range(start, next_start));
+                        start_op = char::from_u32((next_start as u32) + 1);
                     }
                 } else {
                     if (start as u32) - (next_start as u32) > 1 {
@@ -311,16 +326,21 @@ fn get_all_possible_dfa_transitions(
                         ));
                     }
                     disjoint_transitions.insert(TransitionLabel::Range(next_start, end));
-                    start = char::from_u32((end as u32) + 1).unwrap();
-                    end = next_end;
+                    start_op = Some(char::from_u32((end as u32) + 1).unwrap());
+                    end_op = Some(next_end);
                 }
             } else {
                 disjoint_transitions.insert(TransitionLabel::Range(start, end));
-                start = next_start;
-                end = next_end;
+                start_op = Some(next_start);
+                end_op = Some(next_end);
             }
         }
-        disjoint_transitions.insert(TransitionLabel::Range(start, end));
+        match start_op {
+            Some(start) => {
+                disjoint_transitions.insert(TransitionLabel::Range(start, end_op.unwrap()));
+            }
+            None => (),
+        }
     }
     if has_start_anchor {
         disjoint_transitions.insert(TransitionLabel::StartAnchorAssertion);
@@ -402,10 +422,11 @@ mod tests {
         let text = r"a|b";
         let regex = Regex::new(text).unwrap();
         let nfa = LexerNFA::new(vec![("ALTERNATION_TOKEN".to_string(), 1, regex)]).unwrap();
-        let dfa = LexerDFA::new(nfa).unwrap(); // Add .unwrap() for Result
+        let dfa = LexerDFA::new(nfa).unwrap();
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
@@ -415,11 +436,13 @@ mod tests {
         expected_transitions.insert(1, create_expected_transitions(None, None, None, vec![]));
 
         expected_accepts.insert(1, "ALTERNATION_TOKEN".to_string());
+        expected_token_priorities.insert("ALTERNATION_TOKEN".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 2,
         };
         assert_eq!(dfa, expected_dfa);
@@ -434,6 +457,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
@@ -446,11 +470,13 @@ mod tests {
         );
 
         expected_accepts.insert(1, "PLUS_TOKEN".to_string());
+        expected_token_priorities.insert("PLUS_TOKEN".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 2,
         };
         assert_eq!(dfa, expected_dfa);
@@ -471,6 +497,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(0, create_expected_transitions(Some(1), None, None, vec![]));
 
@@ -542,12 +569,16 @@ mod tests {
         expected_transitions.insert(6, create_expected_transitions(None, None, None, vec![]));
 
         expected_accepts.insert(4, "IDENTIFIER_TOKEN".to_string());
+        expected_token_priorities.insert("IDENTIFIER_TOKEN".to_string(), 1);
+
         expected_accepts.insert(6, "IF_TOKEN".to_string());
+        expected_token_priorities.insert("IF_TOKEN".to_string(), 2);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 7,
         };
         assert_eq!(dfa, expected_dfa);
@@ -568,6 +599,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
@@ -633,12 +665,18 @@ mod tests {
         );
 
         expected_accepts.insert(1, "IDENTIFIER_TOKEN".to_string());
+        expected_token_priorities.insert("IDENTIFIER_TOKEN".to_string(), 1);
         expected_accepts.insert(2, "IDENTIFIER_TOKEN".to_string());
+        expected_token_priorities.insert("IDENTIFIER_TOKEN".to_string(), 1);
+
         expected_accepts.insert(3, "IF_TOKEN".to_string());
+        expected_token_priorities.insert("IF_TOKEN".to_string(), 2);
+
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 4,
         };
         assert_eq!(dfa, expected_dfa);
@@ -653,8 +691,10 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_accepts.insert(0, "OPTIONAL_A".to_string());
+        expected_token_priorities.insert("OPTIONAL_A".to_string(), 1);
 
         expected_transitions.insert(
             0,
@@ -663,11 +703,13 @@ mod tests {
 
         expected_transitions.insert(1, create_expected_transitions(None, None, None, vec![]));
         expected_accepts.insert(1, "OPTIONAL_A".to_string());
+        expected_token_priorities.insert("OPTIONAL_A".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 2,
         };
         assert_eq!(dfa, expected_dfa);
@@ -682,6 +724,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
@@ -689,11 +732,13 @@ mod tests {
         );
 
         expected_accepts.insert(0, "STAR_A".to_string());
+        expected_token_priorities.insert("STAR_A".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 1,
         };
         assert_eq!(dfa, expected_dfa);
@@ -708,6 +753,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
@@ -716,11 +762,13 @@ mod tests {
 
         expected_transitions.insert(1, create_expected_transitions(None, None, None, vec![]));
         expected_accepts.insert(1, "DIGIT_TOKEN".to_string());
+        expected_token_priorities.insert("DIGIT_TOKEN".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 2,
         };
         assert_eq!(dfa, expected_dfa);
@@ -735,6 +783,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
@@ -767,11 +816,13 @@ mod tests {
         );
 
         expected_accepts.insert(1, "WORD_TOKEN".to_string());
+        expected_token_priorities.insert("WORD_TOKEN".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 2,
         };
         assert_eq!(dfa, expected_dfa);
@@ -786,6 +837,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
@@ -806,11 +858,13 @@ mod tests {
         expected_transitions.insert(1, create_expected_transitions(None, None, None, vec![]));
 
         expected_accepts.insert(1, "WHITESPACE_TOKEN".to_string());
+        expected_token_priorities.insert("WHITESPACE_TOKEN".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 2,
         };
         assert_eq!(dfa, expected_dfa);
@@ -825,6 +879,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
@@ -843,11 +898,13 @@ mod tests {
 
         expected_transitions.insert(3, create_expected_transitions(None, None, None, vec![]));
         expected_accepts.insert(3, "COMPLEX_TOKEN".to_string());
+        expected_token_priorities.insert("COMPLEX_TOKEN".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 4,
         };
         assert_eq!(dfa, expected_dfa);
@@ -862,6 +919,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
@@ -871,11 +929,13 @@ mod tests {
         expected_transitions.insert(1, create_expected_transitions(None, None, None, vec![]));
 
         expected_accepts.insert(1, "ANY_CHAR_TOKEN".to_string());
+        expected_token_priorities.insert("ANY_CHAR_TOKEN".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 2,
         };
         assert_eq!(dfa, expected_dfa);
@@ -890,6 +950,7 @@ mod tests {
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new(); // Added
 
         expected_transitions.insert(0, create_expected_transitions(None, None, Some(1), vec![]));
 
@@ -914,58 +975,136 @@ mod tests {
         );
 
         expected_transitions.insert(5, create_expected_transitions(None, None, None, vec![]));
+
         expected_accepts.insert(5, "BW_WORD".to_string());
+        expected_token_priorities.insert("BW_WORD".to_string(), 1);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
+            token_priorities: expected_token_priorities,
             next_state_id: 6,
         };
         assert_eq!(dfa, expected_dfa);
     }
 
     #[test]
-    fn lexer_dfa_word_boundary_at_end() {
-        let text = r"word\b";
-        let regex = Regex::new(text).unwrap();
-        let nfa = LexerNFA::new(vec![("WORD_BW".to_string(), 1, regex)]).unwrap();
+    fn lexer_dfa_multiple_patterns_different_priorities() {
+        let text_int = r"int";
+        let text_identifier = r"[a-zA-Z_][a-zA-Z0-9_]*";
+
+        let regex_int = Regex::new(text_int).unwrap();
+        let regex_identifier = Regex::new(text_identifier).unwrap();
+
+        let nfa = LexerNFA::new(vec![
+            ("KEYWORD_INT".to_string(), 10, regex_int),
+            ("IDENTIFIER".to_string(), 1, regex_identifier),
+        ])
+        .unwrap();
+
         let dfa = LexerDFA::new(nfa).unwrap();
 
         let mut expected_transitions = HashMap::new();
         let mut expected_accepts = HashMap::new();
+        let mut expected_token_priorities = HashMap::new();
 
         expected_transitions.insert(
             0,
-            create_expected_transitions(None, None, None, vec![(('w', 'w'), 1)]),
+            create_expected_transitions(
+                None,
+                None,
+                None,
+                vec![
+                    (('A', 'Z'), 1),
+                    (('a', 'h'), 1),
+                    (('i', 'i'), 2),
+                    (('j', 'z'), 1),
+                    (('_', '_'), 1),
+                ],
+            ),
         );
 
         expected_transitions.insert(
             1,
-            create_expected_transitions(None, None, None, vec![(('o', 'o'), 2)]),
+            create_expected_transitions(
+                None,
+                None,
+                None,
+                vec![
+                    (('0', '9'), 1),
+                    (('A', 'Z'), 1),
+                    (('_', '_'), 1),
+                    (('a', 'z'), 1),
+                ],
+            ),
         );
+        expected_accepts.insert(1, "IDENTIFIER".to_string());
+        expected_token_priorities.insert("IDENTIFIER".to_string(), 1);
 
         expected_transitions.insert(
             2,
-            create_expected_transitions(None, None, None, vec![(('r', 'r'), 3)]),
+            create_expected_transitions(
+                None,
+                None,
+                None,
+                vec![
+                    (('0', '9'), 1),
+                    (('A', 'Z'), 1),
+                    (('a', 'm'), 1),
+                    (('n', 'n'), 3),
+                    (('o', 'z'), 1),
+                    (('_', '_'), 1),
+                ],
+            ),
         );
+        expected_accepts.insert(2, "IDENTIFIER".to_string());
+        expected_token_priorities.insert("IDENTIFIER".to_string(), 1);
 
         expected_transitions.insert(
             3,
-            create_expected_transitions(None, None, None, vec![(('d', 'd'), 4)]),
+            create_expected_transitions(
+                None,
+                None,
+                None,
+                vec![
+                    (('0', '9'), 1),
+                    (('A', 'Z'), 1),
+                    (('a', 's'), 1),
+                    (('t', 't'), 4),
+                    (('u', 'z'), 1),
+                    (('_', '_'), 1),
+                ],
+            ),
         );
+        expected_accepts.insert(3, "IDENTIFIER".to_string());
+        expected_token_priorities.insert("IDENTIFIER".to_string(), 1);
 
-        expected_transitions.insert(4, create_expected_transitions(None, None, Some(5), vec![]));
-
-        expected_transitions.insert(5, create_expected_transitions(None, None, None, vec![]));
-        expected_accepts.insert(5, "WORD_BW".to_string());
+        expected_transitions.insert(
+            4,
+            create_expected_transitions(
+                None,
+                None,
+                None,
+                vec![
+                    (('0', '9'), 1),
+                    (('A', 'Z'), 1),
+                    (('_', '_'), 1),
+                    (('a', 'z'), 1),
+                ],
+            ),
+        );
+        expected_accepts.insert(4, "KEYWORD_INT".to_string());
+        expected_token_priorities.insert("KEYWORD_INT".to_string(), 10);
 
         let expected_dfa = LexerDFA {
             start_state: 0,
             transitions: expected_transitions,
             accept_states: expected_accepts,
-            next_state_id: 6,
+            token_priorities: expected_token_priorities,
+            next_state_id: 5,
         };
+
         assert_eq!(dfa, expected_dfa);
     }
 }
