@@ -30,7 +30,7 @@
 //!
 //!
 //! ```rust
-//! use lexer::{define_language, token, keyword, ignore_token, open_pair, close_pair, ignore_until};
+//! use lexit::{define_language, token, keyword, ignore_token, open_pair, close_pair, ignore_until};
 //!
 //! let language_result = define_language! {
 //!         ignore_token!("WHITESPACE", r"\s+", 10),
@@ -71,7 +71,7 @@
 //! The use of macros is optional and only offers conciseness. Here is an example of defining a simple arithmetic language without macros:
 //!
 //! ```rust
-//! use lexer::{Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
+//! use lexit::{Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
 //!
 //! let definitions = vec![
 //!         TokenDefinition::new(
@@ -178,7 +178,7 @@
 //! Below is an example of lexing text:
 //!
 //! ```rust
-//! use lexer::{Lexer, Language, TokenDefinition, TokenBehavior};
+//! use lexit::{Lexer, Language, TokenDefinition, TokenBehavior};
 //!
 //! # let definitions = vec![
 //! #        TokenDefinition::new(

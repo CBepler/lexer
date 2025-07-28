@@ -89,8 +89,8 @@ impl Regex {
     ///
     /// # Examples
     /// ```
-    /// use lexer::regex::{Regex, RegexPattern, escapes::EscapeChar};
-    /// use lexer::regex::RegexPattern::{Literal, Concatenation, EscapeChar as RegexEscapeChar};
+    /// use lexit::regex::{Regex, RegexPattern, escapes::EscapeChar};
+    /// use lexit::regex::RegexPattern::{Literal, Concatenation, EscapeChar as RegexEscapeChar};
     ///
     /// let reg = Regex::new(r"a\d").unwrap();
     /// assert_eq!(reg.get_pattern(), &Concatenation(vec![

@@ -1,6 +1,6 @@
 use std::fs;
 
-use lexer::{lex::Lexer, *};
+use lexit::{lex::Lexer, *};
 
 #[test]
 fn json_like_language() {

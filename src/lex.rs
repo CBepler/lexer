@@ -118,7 +118,7 @@ impl Lexer {
     ///
     /// # Examples
     /// ```
-    /// use lexer::{Lexer, Language, TokenDefinition, TokenBehavior};
+    /// use lexit::{Lexer, Language, TokenDefinition, TokenBehavior};
     /// // Assume a simple language is defined
     /// let language = Language::new(vec![
     ///     TokenDefinition::new("IDENTIFIER".to_string(), r"[a-z]+", TokenBehavior::None, 10, true).unwrap(),
@@ -200,7 +200,7 @@ impl Lexer {
     ///
     /// # Examples
     /// ```
-    /// use lexer::{Lexer, Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
+    /// use lexit::{Lexer, Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
     ///
     /// let language = Language::new(vec![
     ///     TokenDefinition::new("VAR".to_string(), r"var\b", TokenBehavior::None, 100, false).unwrap(),

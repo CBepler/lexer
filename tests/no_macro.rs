@@ -1,4 +1,4 @@
-use lexer::{
+use lexit::{
     language::{Language, PairDefinition, PairDirection, TokenBehavior, TokenDefinition},
     lex::{Lexer, Token},
 };

@@ -39,7 +39,7 @@ macro_rules! __lexor_create_token_definition {
 ///
 /// # Examples
 /// ```
-/// use lexer::keyword;
+/// use lexit::keyword;
 /// let if_token = keyword!("IF_KEYWORD", r"if\b", 100);
 /// assert!(if_token.is_ok());
 /// ```
@@ -72,7 +72,7 @@ macro_rules! keyword {
 ///
 /// # Examples
 /// ```
-/// use lexer::token;
+/// use lexit::token;
 /// let identifier = token!("IDENTIFIER", r"[a-zA-Z_][a-zA-Z0-9_]*", 50, true);
 /// assert!(identifier.is_ok());
 /// ```
@@ -104,7 +104,7 @@ macro_rules! token {
 ///
 /// # Examples
 /// ```
-/// use lexer::ignore_token;
+/// use lexit::ignore_token;
 /// let whitespace = ignore_token!("WHITESPACE", r"\s+", 10);
 /// assert!(whitespace.is_ok());
 /// ```
@@ -137,7 +137,7 @@ macro_rules! ignore_token {
 ///
 /// # Examples
 /// ```
-/// use lexer::open_pair;
+/// use lexit::open_pair;
 /// let left_brace = open_pair!("LEFT_BRACE", r"\{", "RIGHT_BRACE", 90);
 /// assert!(left_brace.is_ok());
 /// ```
@@ -173,7 +173,7 @@ macro_rules! open_pair {
 ///
 /// # Examples
 /// ```
-/// use lexer::close_pair;
+/// use lexit::close_pair;
 /// let right_brace = close_pair!("RIGHT_BRACE", r"\}", "LEFT_BRACE", 90);
 /// assert!(right_brace.is_ok());
 /// ```
@@ -210,7 +210,7 @@ macro_rules! close_pair {
 ///
 /// # Examples
 /// ```
-/// use lexer::ignore_until;
+/// use lexit::ignore_until;
 /// let multi_comment = ignore_until!("MULTI_LINE_COMMENT", r"/\*", r"\*/", 5);
 /// assert!(multi_comment.is_ok());
 /// ```
@@ -246,7 +246,7 @@ macro_rules! ignore_until {
 ///
 /// # Examples
 /// ```
-/// use lexer::{define_language, keyword, token, open_pair, close_pair};
+/// use lexit::{define_language, keyword, token, open_pair, close_pair};
 ///
 /// let my_language = define_language! {
 ///     keyword!("FN", r"fn\b", 100),

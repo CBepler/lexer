@@ -1,4 +1,4 @@
-use lexer::{lex::Lexer, *};
+use lexit::{lex::Lexer, *};
 
 #[test]
 fn arithmetic_expression_language() {

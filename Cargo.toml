@@ -1,5 +1,5 @@
 [package]
-name = "lexer"
+name = "lexit"
 version = "0.1.0"
 edition = "2024"
 description = "A Lexical Analysis tool for defining a language and lexing it into tokens"

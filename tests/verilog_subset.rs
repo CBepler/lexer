@@ -1,6 +1,6 @@
 use std::fs;
 
-use lexer::{lex::Lexer, *};
+use lexit::{lex::Lexer, *};
 
 #[test]
 fn verilog_subset_macro() {

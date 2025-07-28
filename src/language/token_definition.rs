@@ -41,7 +41,7 @@ impl TokenDefinition {
     ///
     /// # Examples
     /// ```
-    /// use lexer::language::{TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
+    /// use lexit::language::{TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
     ///
     /// // Simple token
     /// let keyword_token = TokenDefinition::new(

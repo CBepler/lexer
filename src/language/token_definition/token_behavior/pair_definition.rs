@@ -18,7 +18,7 @@ impl PairDefinition {
     ///
     /// # Examples
     /// ```
-    /// use lexer::language::{PairDefinition, PairDirection};
+    /// use lexit::language::{PairDefinition, PairDirection};
     ///
     /// let open_paren_def = PairDefinition::new(PairDirection::Open, "RIGHT_PAREN".to_string());
     /// assert_eq!(open_paren_def.get_pair_type(), &PairDirection::Open);

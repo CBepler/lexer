@@ -40,7 +40,7 @@ impl Language {
     ///
     /// # Examples
     /// ```
-    /// use lexer::language::{Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
+    /// use lexit::language::{Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
     ///
     /// // Example of valid tokens
     /// let ok_tokens = vec![
@@ -142,7 +142,7 @@ impl Language {
     ///
     /// # Examples
     /// ```
-    /// use lexer::language::{Language, TokenDefinition, TokenBehavior};
+    /// use lexit::language::{Language, TokenDefinition, TokenBehavior};
     ///
     /// let ok_results = vec![
     ///     TokenDefinition::new("ID".to_string(), r"[a-z]+", TokenBehavior::None, 10, true),
