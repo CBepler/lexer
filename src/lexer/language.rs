@@ -10,9 +10,6 @@ pub use token_definition::{
     },
 };
 
-#[cfg(test)]
-use super::*;
-
 pub mod token_definition;
 
 /// Represents a defined programming language, containing a collection of token definitions
@@ -193,7 +190,7 @@ impl Language {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::*;
 
     #[test]
     fn language_new_correct_creates_language() {

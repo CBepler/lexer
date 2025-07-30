@@ -12,7 +12,7 @@
 /// * `$behavior`: The `TokenBehavior` for the token.
 macro_rules! __lexor_create_token_definition {
     ($name:expr, $regex_str:expr, $priority:expr, $to_store:expr, $behavior:expr) => {
-        $crate::language::TokenDefinition::new(
+        $crate::lexer::language::TokenDefinition::new(
             $name.to_string(),
             $regex_str,
             $behavior,
@@ -50,7 +50,7 @@ macro_rules! keyword {
             $regex_str,
             $priority,
             false,
-            $crate::language::TokenBehavior::None
+            $crate::lexer::language::TokenBehavior::None
         )
     };
 }
@@ -83,7 +83,7 @@ macro_rules! token {
             $regex_str,
             $priority,
             $to_store,
-            $crate::language::TokenBehavior::None
+            $crate::lexer::language::TokenBehavior::None
         )
     };
 }
@@ -115,7 +115,7 @@ macro_rules! ignore_token {
             $regex_str,
             $priority,
             false,
-            $crate::language::TokenBehavior::Ignore
+            $crate::lexer::language::TokenBehavior::Ignore
         )
     };
 }
@@ -148,10 +148,12 @@ macro_rules! open_pair {
             $regex_str,
             $priority,
             false,
-            $crate::language::TokenBehavior::Pair($crate::language::PairDefinition::new(
-                $crate::language::PairDirection::Open,
-                $counterpart.to_string(),
-            ))
+            $crate::lexer::language::TokenBehavior::Pair(
+                $crate::lexer::language::PairDefinition::new(
+                    $crate::lexer::language::PairDirection::Open,
+                    $counterpart.to_string(),
+                )
+            )
         )
     };
 }
@@ -184,10 +186,12 @@ macro_rules! close_pair {
             $regex_str,
             $priority,
             false,
-            $crate::language::TokenBehavior::Pair($crate::language::PairDefinition::new(
-                $crate::language::PairDirection::Close,
-                $counterpart.to_string(),
-            ))
+            $crate::lexer::language::TokenBehavior::Pair(
+                $crate::lexer::language::PairDefinition::new(
+                    $crate::lexer::language::PairDirection::Close,
+                    $counterpart.to_string(),
+                )
+            )
         )
     };
 }
@@ -221,7 +225,7 @@ macro_rules! ignore_until {
             $regex_str,
             $priority,
             false,
-            $crate::language::TokenBehavior::IgnoreUntil($end_regex_str.to_string())
+            $crate::lexer::language::TokenBehavior::IgnoreUntil($end_regex_str.to_string())
         )
     };
 }
@@ -261,7 +265,7 @@ macro_rules! ignore_until {
 /// ```
 macro_rules! define_language {
     ( $( $token_def:expr ),* $(,)? ) => {
-        $crate::language::Language::new_from_results(
+        $crate::lexer::language::Language::new_from_results(
             vec![ $( $token_def ),* ],
         )
     };
@@ -269,7 +273,7 @@ macro_rules! define_language {
 
 #[cfg(test)]
 mod tests {
-    use crate::language::{PairDefinition, PairDirection, TokenBehavior, TokenDefinition};
+    use crate::{PairDefinition, PairDirection, TokenBehavior, TokenDefinition};
 
     fn create_expected_token(
         name: &str,

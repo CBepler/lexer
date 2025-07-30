@@ -178,7 +178,7 @@
 //! Below is an example of lexing text:
 //!
 //! ```rust
-//! use lexit::{Lexer, Language, TokenDefinition, TokenBehavior};
+//! use lexit::{Lexer, Language, TokenDefinition, TokenBehavior, Parsable};
 //!
 //! # let definitions = vec![
 //! #        TokenDefinition::new(
@@ -213,12 +213,16 @@
 //!     eprintln!("Lexing error: {}", e);
 //! }
 //! ```
-pub mod language;
-pub mod lex;
-mod macros;
-pub mod regex;
+
+pub mod lexer;
+pub mod parser;
 
 #[doc(inline)]
-pub use language::{Language, PairDefinition, PairDirection, TokenBehavior, TokenDefinition};
+pub use lexer::{
+    language::{self, Language, PairDefinition, PairDirection, TokenBehavior, TokenDefinition},
+    lex::{self, Lexer, Token},
+    regex::{self, Regex},
+};
+
 #[doc(inline)]
-pub use lex::{Lexer, Token};
+pub use parser::parsable::Parsable;

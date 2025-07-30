@@ -11,6 +11,7 @@ use std::{
 use crate::{
     language::{Language, PairDirection, TokenBehavior},
     lex::{dfa::LexerDFA, nfa::LexerNFA},
+    parser::parsable::Parsable,
 };
 
 mod dfa;
@@ -48,24 +49,26 @@ impl Token {
             col,
         }
     }
+}
 
+impl Parsable for Token {
     /// Returns the name of the token.
-    pub fn get_name(&self) -> &str {
+    fn get_name(&self) -> &str {
         &self.name
     }
 
     /// Returns a reference to the optional matched text of the token.
-    pub fn get_match(&self) -> &Option<String> {
+    fn get_match(&self) -> &Option<String> {
         &self.text_match
     }
 
     /// Returns the 1-based row number where the token starts.
-    pub fn get_row(&self) -> usize {
+    fn get_row(&self) -> usize {
         self.row
     }
 
     /// Returns the 1-based column number where the token starts.
-    pub fn get_col(&self) -> usize {
+    fn get_col(&self) -> usize {
         self.col
     }
 }
@@ -200,7 +203,7 @@ impl Lexer {
     ///
     /// # Examples
     /// ```
-    /// use lexit::{Lexer, Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection};
+    /// use lexit::{Lexer, Language, TokenDefinition, TokenBehavior, PairDefinition, PairDirection, Parsable};
     ///
     /// let language = Language::new(vec![
     ///     TokenDefinition::new("VAR".to_string(), r"var\b", TokenBehavior::None, 100, false).unwrap(),
@@ -568,8 +571,7 @@ fn update_row_col(ch: char, row: usize, col: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::Lexer;
-    use crate::language::Language;
-    use crate::*;
+    use crate::{Language, Parsable, *};
 
     fn create_test_language() -> Result<Language, String> {
         define_language! {
