@@ -4,7 +4,7 @@ version = "0.1.2"
 edition = "2024"
 description = "A Lexical Analysis tool for defining a language and lexing it into tokens"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/CBepler/lexer"
+repository = "https://github.com/CBepler/lexit"
 keywords = ["parser", "lexer", "compiler"]
 categories = ["compilers", "parsing"]
 
