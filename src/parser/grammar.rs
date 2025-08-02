@@ -26,6 +26,7 @@ pub struct Grammar {
     start_symbol: String,
     valid_terminal_set: HashSet<String>,
     ambiguous_tokens: HashMap<String, Vec<String>>,
+    derives_empty: HashSet<String>,
 }
 
 impl Grammar {
@@ -105,12 +106,47 @@ impl Grammar {
                 .push(body.clone());
             reverse_production_map.insert(body, head);
         }
+        let mut derives_empty = HashSet::new();
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (key, val) in &production_map {
+                if derives_empty.contains(key) {
+                    continue;
+                }
+                if val.iter().any(|inner| inner.is_empty()) {
+                    derives_empty.insert(key.clone());
+                    changed = true;
+                    continue;
+                }
+                for body in val {
+                    for symbol in body {
+                        match symbol {
+                            Symbol::NonTerminal(x) => {
+                                if derives_empty.contains(x) {
+                                    if *body.iter().last().unwrap()
+                                        == Symbol::NonTerminal(x.to_string())
+                                    {
+                                        derives_empty.insert(key.clone());
+                                        changed = true;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                            Symbol::Terminal(_) => break,
+                        }
+                    }
+                }
+            }
+        }
         Ok(Grammar {
             start_symbol,
             production_rules: production_map,
             reverse_production_rule: reverse_production_map,
             valid_terminal_set,
             ambiguous_tokens: ambiguous_map,
+            derives_empty,
         })
     }
 
@@ -131,6 +167,10 @@ impl Grammar {
             production_rules,
             ambiguous_tokens,
         )
+    }
+
+    pub fn get_production_rules(&self) -> &HashMap<String, Vec<Vec<Symbol>>> {
+        &self.production_rules
     }
 }
 
@@ -396,5 +436,145 @@ mod tests {
         assert!(grammar.valid_terminal_set.contains("MINUS"));
         assert!(grammar.production_rules.contains_key("E"));
         assert!(grammar.production_rules.contains_key("T"));
+    }
+
+    #[test]
+    fn test_derives_empty_immediate_epsilon() {
+        let start_symbol = String::from("S");
+        let valid_token_names = vec![String::from("PLUS")];
+        let production_rules = vec![ProductionRule {
+            head: String::from("S"),
+            body: vec![],
+        }];
+        let ambiguous_tokens = vec![];
+
+        let result = Grammar::new(
+            start_symbol,
+            valid_token_names,
+            production_rules,
+            ambiguous_tokens,
+        );
+        let grammar = result.unwrap();
+        assert!(grammar.derives_empty.contains("S"));
+    }
+
+    #[test]
+    fn test_derives_empty_chained_epsilon() {
+        let start_symbol = String::from("S");
+        let valid_token_names = vec![String::from("PLUS")];
+        let production_rules = vec![
+            ProductionRule {
+                head: String::from("S"),
+                body: vec![Symbol::NonTerminal(String::from("A"))],
+            },
+            ProductionRule {
+                head: String::from("A"),
+                body: vec![],
+            },
+        ];
+        let ambiguous_tokens = vec![];
+
+        let result = Grammar::new(
+            start_symbol,
+            valid_token_names,
+            production_rules,
+            ambiguous_tokens,
+        );
+        let grammar = result.unwrap();
+        assert!(grammar.derives_empty.contains("S"));
+        assert!(grammar.derives_empty.contains("A"));
+    }
+
+    #[test]
+    fn test_derives_empty_with_multiple_rules() {
+        let start_symbol = String::from("S");
+        let valid_token_names = vec![String::from("PLUS")];
+        let production_rules = vec![
+            ProductionRule {
+                head: String::from("S"),
+                body: vec![Symbol::NonTerminal(String::from("A"))],
+            },
+            ProductionRule {
+                head: String::from("S"),
+                body: vec![Symbol::Terminal(String::from("PLUS"))],
+            },
+            ProductionRule {
+                head: String::from("A"),
+                body: vec![],
+            },
+        ];
+        let ambiguous_tokens = vec![];
+
+        let result = Grammar::new(
+            start_symbol,
+            valid_token_names,
+            production_rules,
+            ambiguous_tokens,
+        );
+        let grammar = result.unwrap();
+        assert!(grammar.derives_empty.contains("S"));
+        assert!(grammar.derives_empty.contains("A"));
+    }
+
+    #[test]
+    fn test_does_not_derive_empty() {
+        let start_symbol = String::from("S");
+        let valid_token_names = vec![String::from("PLUS")];
+        let production_rules = vec![
+            ProductionRule {
+                head: String::from("S"),
+                body: vec![Symbol::NonTerminal(String::from("A"))],
+            },
+            ProductionRule {
+                head: String::from("A"),
+                body: vec![Symbol::Terminal(String::from("PLUS"))],
+            },
+        ];
+        let ambiguous_tokens = vec![];
+
+        let result = Grammar::new(
+            start_symbol,
+            valid_token_names,
+            production_rules,
+            ambiguous_tokens,
+        );
+        let grammar = result.unwrap();
+        assert!(!grammar.derives_empty.contains("S"));
+        assert!(!grammar.derives_empty.contains("A"));
+    }
+
+    #[test]
+    fn test_derives_empty_from_multiple_nonterminals() {
+        let start_symbol = String::from("S");
+        let valid_token_names = vec![];
+        let production_rules = vec![
+            ProductionRule {
+                head: String::from("S"),
+                body: vec![
+                    Symbol::NonTerminal(String::from("A")),
+                    Symbol::NonTerminal(String::from("B")),
+                ],
+            },
+            ProductionRule {
+                head: String::from("A"),
+                body: vec![],
+            },
+            ProductionRule {
+                head: String::from("B"),
+                body: vec![],
+            },
+        ];
+        let ambiguous_tokens = vec![];
+
+        let result = Grammar::new(
+            start_symbol,
+            valid_token_names,
+            production_rules,
+            ambiguous_tokens,
+        );
+        let grammar = result.unwrap();
+        assert!(grammar.derives_empty.contains("S"));
+        assert!(grammar.derives_empty.contains("A"));
+        assert!(grammar.derives_empty.contains("B"));
     }
 }
