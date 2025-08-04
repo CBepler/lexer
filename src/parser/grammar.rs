@@ -14,6 +14,12 @@ pub struct ProductionRule {
     body: Vec<Symbol>,
 }
 
+impl ProductionRule {
+    pub fn new(head: String, body: Vec<Symbol>) -> Self {
+        ProductionRule { head, body }
+    }
+}
+
 pub struct AmbiguousToken {
     base_token: String,
     token_variations: Vec<String>,
@@ -21,12 +27,12 @@ pub struct AmbiguousToken {
 
 #[derive(Debug)]
 pub struct Grammar {
-    production_rules: HashMap<String, Vec<Vec<Symbol>>>,
+    pub production_rules: HashMap<String, Vec<Vec<Symbol>>>,
     reverse_production_rule: HashMap<Vec<Symbol>, String>,
-    start_symbol: String,
+    pub start_symbol: String,
     valid_terminal_set: HashSet<String>,
     ambiguous_tokens: HashMap<String, Vec<String>>,
-    derives_empty: HashSet<String>,
+    pub derives_empty: HashSet<String>,
 }
 
 impl Grammar {
@@ -36,6 +42,9 @@ impl Grammar {
         production_rules: Vec<ProductionRule>,
         ambiguous_toks: Vec<AmbiguousToken>,
     ) -> Result<Self, String> {
+        if start_symbol == String::from("S'") {
+            return Err("S' is a reserved name. Please Change".to_string());
+        }
         //Ensure no duplicate valid tokens
         let mut valid_terminal_set = HashSet::new();
         for tok_name in valid_token_names {
@@ -167,10 +176,6 @@ impl Grammar {
             production_rules,
             ambiguous_tokens,
         )
-    }
-
-    pub fn get_production_rules(&self) -> &HashMap<String, Vec<Vec<Symbol>>> {
-        &self.production_rules
     }
 }
 
