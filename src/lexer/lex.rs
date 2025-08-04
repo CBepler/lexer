@@ -90,6 +90,43 @@ struct MatchState {
     is_start_of_line_next: bool,
 }
 
+pub struct LexerIterator<'a> {
+    lexer: &'a Lexer,
+    text: &'a str,
+    current_pos: usize,
+    current_row: usize,
+    current_col: usize,
+    unclosed_pairs: std::collections::HashMap<String, u32>,
+}
+
+impl<'a> Iterator for LexerIterator<'a> {
+    type Item = Result<Token, String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.lexer.lex_token(
+            self.text,
+            &mut self.current_row,
+            &mut self.current_col,
+            &mut self.current_pos,
+            &mut self.unclosed_pairs,
+        ) {
+            Ok(tok) => {
+                return Some(Ok(tok));
+            }
+            Err(e) => {
+                if !e.contains("EOF") {
+                    return Some(Err(e));
+                }
+            }
+        }
+        let entry = self.unclosed_pairs.iter().find(|entry| *entry.1 > 0);
+        if let Some(unclosed) = entry {
+            return Some(Err(format!("Unclosed open pair: {}", unclosed.0)));
+        }
+        None
+    }
+}
+
 /// The main Lexer struct, responsible for tokenizing input text.
 ///
 /// It holds the compiled DFA for the language and manages state during the lexing process,
@@ -187,6 +224,17 @@ impl Lexer {
         })
     }
 
+    pub fn lex_iter<'a>(&'a self, text: &'a str) -> LexerIterator<'a> {
+        LexerIterator {
+            lexer: self,
+            text,
+            current_pos: 0,
+            current_row: 1,
+            current_col: 1,
+            unclosed_pairs: HashMap::new(),
+        }
+    }
+
     /// Tokenizes the given input text into a vector of `Token`s.
     ///
     /// This method iterates through the input string, identifying the longest
@@ -245,16 +293,52 @@ impl Lexer {
         let mut current_pos: usize = 0;
         let mut unclosed_pairs: HashMap<String, u32> = HashMap::new();
 
-        while current_pos < text.len() {
-            let remaining_text = &text[current_pos..];
+        loop {
+            match self.lex_token(
+                text,
+                &mut current_row,
+                &mut current_col,
+                &mut current_pos,
+                &mut unclosed_pairs,
+            ) {
+                Ok(tok) => tokens.push(tok),
+                Err(e) => {
+                    if e.contains("EOF") {
+                        break;
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        let entry = unclosed_pairs.iter().find(|entry| *entry.1 > 0);
+        if let Some(unclosed) = entry {
+            return Err(format!("Unclosed open pair: {}", unclosed.0));
+        }
+        Ok(tokens)
+    }
+
+    fn lex_token(
+        &self,
+        text: &str,
+        current_row: &mut usize,
+        current_col: &mut usize,
+        current_pos: &mut usize,
+        unclosed_pairs: &mut HashMap<String, u32>,
+    ) -> Result<Token, String> {
+        let mut token = None;
+        while token.is_none() {
+            if *current_pos >= text.len() {
+                return Err("EOF".to_string());
+            }
+            let remaining_text = &text[*current_pos..];
             let mut active_match_states: Vec<MatchState> = Vec::new();
 
             let initial_dfa_state = self.language_dfa.get_start_state();
             active_match_states.push(MatchState {
                 dfa_state: initial_dfa_state,
                 matched_len: 0,
-                is_start_of_line_next: current_pos == 0
-                    || check_line_end_char(text[..current_pos].chars().last()),
+                is_start_of_line_next: *current_pos == 0
+                    || check_line_end_char(text[..*current_pos].chars().last()),
             });
 
             let mut best_match_len: usize = 0;
@@ -300,7 +384,7 @@ impl Lexer {
                     let prev_char_opt_for_boundary = consumed_chars_for_lookahead
                         .last()
                         .copied()
-                        .or_else(|| text[..current_pos].chars().last());
+                        .or_else(|| text[..*current_pos].chars().last());
 
                     if let Some(target_state) = transitions.get_word_boundry_assertion_target() {
                         if is_word_boundary(prev_char_opt_for_boundary, char_at_lookahead_pos_opt) {
@@ -413,19 +497,19 @@ impl Lexer {
                 let matched_len = best_match_len;
                 let token_name = best_match_token_name.unwrap();
                 let matched_text = &remaining_text[..matched_len];
-                let initial_token_row = current_row;
-                let initial_token_col = current_col;
+                let initial_token_row = current_row.clone();
+                let initial_token_col = current_col.clone();
                 for ch in matched_text.chars() {
-                    (current_row, current_col) = update_row_col(ch, current_row, current_col)
+                    (*current_row, *current_col) = update_row_col(ch, *current_row, *current_col)
                 }
 
                 if let Some(ignore_dfa) = self.ignore_dfas.get(&token_name) {
-                    current_pos += matched_len;
+                    *current_pos += matched_len;
 
                     let mut end_match_len: usize = 0;
                     let mut current_ignore_dfa_state = ignore_dfa.get_start_state();
-                    let mut temp_ignore_lookahead_pos = current_pos;
-                    let mut ignore_chars_iter = text[current_pos..].chars().peekable();
+                    let mut temp_ignore_lookahead_pos = current_pos.clone();
+                    let mut ignore_chars_iter = text[*current_pos..].chars().peekable();
 
                     while let Some(ch_in_ignore) = ignore_chars_iter.next() {
                         let ch_in_ignore_len = ch_in_ignore.len_utf8();
@@ -454,8 +538,8 @@ impl Lexer {
                             }
                         }
 
-                        (current_row, current_col) =
-                            update_row_col(ch_in_ignore, current_row, current_col);
+                        (*current_row, *current_col) =
+                            update_row_col(ch_in_ignore, *current_row, *current_col);
 
                         temp_ignore_lookahead_pos += ch_in_ignore_len;
 
@@ -463,13 +547,13 @@ impl Lexer {
                             .get_accept_states()
                             .contains_key(&current_ignore_dfa_state)
                         {
-                            end_match_len = temp_ignore_lookahead_pos - current_pos;
+                            end_match_len = temp_ignore_lookahead_pos - *current_pos;
                             break;
                         }
                     }
 
                     if end_match_len > 0 {
-                        current_pos = temp_ignore_lookahead_pos;
+                        *current_pos = temp_ignore_lookahead_pos;
                     } else {
                         return Err(format!(
                             "Unterminated ignore block starting with token '{}' at row: {}  col: {}",
@@ -498,29 +582,25 @@ impl Lexer {
                             .entry(self.close_pairs.get(&token_name).unwrap().clone())
                             .or_insert(0) -= 1;
                     }
-                    tokens.push(Token {
+                    token = Some(Token {
                         name: token_name,
                         text_match: text_to_store,
                         row: initial_token_row,
                         col: initial_token_col,
                     });
-                    current_pos += matched_len;
+                    *current_pos += matched_len;
                 } else {
-                    current_pos += matched_len;
+                    *current_pos += matched_len;
                 }
             } else {
-                let char_at_error = text[current_pos..].chars().next().unwrap_or(' ');
+                let char_at_error = text[*current_pos..].chars().next().unwrap_or(' ');
                 return Err(format!(
                     "Unexpected character at row {} col {}: '{}'",
                     current_row, current_col, char_at_error
                 ));
             }
         }
-        let entry = unclosed_pairs.iter().find(|entry| *entry.1 > 0);
-        if let Some(unclosed) = entry {
-            return Err(format!("Unclosed open pair: {}", unclosed.0));
-        }
-        Ok(tokens)
+        Ok(token.unwrap())
     }
 }
 

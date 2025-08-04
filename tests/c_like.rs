@@ -45,9 +45,13 @@ fn c_like_language() {
         language_result.unwrap_err()
     );
     println!("Successfully defined C-like Language!");
-    let lexer = Lexer::new(language_result.unwrap()).unwrap();
+    let language = language_result.unwrap();
+    let lexer = Lexer::new(language).unwrap();
     let contents = fs::read_to_string("tests/resources/c_simple.c").unwrap();
     let tokens = lexer.lex(&contents);
+    let token_iter = lexer.lex_iter(&contents);
+
+    assert_eq!(tokens, token_iter.collect());
 
     if tokens.is_err() {
         eprintln!("Lexing error: {:?}", tokens.unwrap_err());
