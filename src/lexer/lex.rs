@@ -53,7 +53,7 @@ impl Token {
 
 impl Parsable for Token {
     /// Returns the name of the token.
-    fn get_name(&self) -> &str {
+    fn get_name(&self) -> &String {
         &self.name
     }
 
