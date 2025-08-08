@@ -1,6 +1,12 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    f32::consts::E,
+};
 
-use crate::parser::grammar::{AmbiguousToken, Grammar, Symbol};
+use crate::{
+    Parsable,
+    parser::grammar::{AmbiguousToken, Grammar, Symbol},
+};
 
 type NodeId = usize;
 
@@ -28,18 +34,8 @@ struct State {
     is_accept_state: bool,
 }
 
-struct StateConstructor {
-    next_id: usize,
-}
-
-impl StateConstructor {
-    fn new() -> Self {
-        StateConstructor { next_id: 0 }
-    }
-
-    fn new_state(&mut self) -> State {
-        let id = self.next_id;
-        self.next_id += 1;
+impl IDConstructable for State {
+    fn new(id: NodeId) -> Self {
         State {
             id,
             transitions: HashMap::new(),
@@ -50,9 +46,84 @@ impl StateConstructor {
     }
 }
 
+trait IDConstructable {
+    fn new(id: NodeId) -> Self;
+}
+
+struct StateConstructor {
+    next_id: usize,
+}
+
+impl StateConstructor {
+    fn new() -> Self {
+        StateConstructor { next_id: 0 }
+    }
+
+    fn new_state<T>(&mut self) -> T
+    where
+        T: IDConstructable,
+    {
+        let id = self.next_id;
+        self.next_id += 1;
+        T::new(id)
+    }
+}
+
+//Concrete Syntax Tree
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct CSTNode {
+    name: String,
+    value: Option<String>,
+    children: Option<CSTChildren>,
+}
+
+impl CSTNode {
+    fn new(name: String, value: Option<String>) -> Self {
+        CSTNode {
+            name,
+            value,
+            children: None,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+enum CSTChildren {
+    Single(Vec<CSTNode>),
+    Ambiguous(Vec<Vec<CSTNode>>),
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct GssNode {
-    state: NodeId,
-    parents: Vec<GssNode>,
+    id: NodeId,
+    state: Option<NodeId>,
+    parents: Option<Vec<NodeId>>,
+    cst_node: Option<CSTNode>,
+}
+
+impl IDConstructable for GssNode {
+    fn new(id: NodeId) -> Self {
+        GssNode {
+            id,
+            state: None,
+            parents: None,
+            cst_node: None,
+        }
+    }
+}
+
+impl GssNode {
+    fn set_state(&mut self, state: NodeId) {
+        self.state = Some(state);
+    }
+
+    fn set_parents(&mut self, parents: Vec<NodeId>) {
+        self.parents = Some(parents);
+    }
+
+    fn set_cst_node(&mut self, cst_node: CSTNode) {
+        self.cst_node = Some(cst_node);
+    }
 }
 
 struct Glr {
@@ -62,25 +133,321 @@ struct Glr {
     //Map from non-terminals to terminals that can follow
     follows: HashMap<String, HashSet<String>>,
     states: HashMap<NodeId, State>,
-    gss_root: GssNode,
+    start_state_id: NodeId,
 }
 
 impl Glr {
     pub fn new(grammar: Grammar) -> Result<Self, String> {
         let (firsts, follows) = construct_firsts_follows(&grammar);
         let (states, start_id) = construct_states(&grammar);
-        let gss_root = GssNode {
-            state: start_id,
-            parents: Vec::new(),
-        };
         Ok(Glr {
             grammar,
             firsts,
             follows,
             states,
-            gss_root,
+            start_state_id: start_id,
         })
     }
+
+    pub fn parse<T, K>(&self, mut token_iter: T) -> Result<CSTNode, String>
+    where
+        T: Iterator<Item = Result<K, String>>,
+        K: Parsable,
+    {
+        let mut gss_constructor = StateConstructor::new();
+        let mut gss_map: HashMap<NodeId, GssNode> = HashMap::new();
+        let mut gss_root = gss_constructor.new_state::<GssNode>();
+        gss_root.set_state(self.start_state_id);
+        gss_root.set_cst_node(CSTNode::new("S'".to_string(), None));
+        let mut gss_roots: VecDeque<NodeId> = VecDeque::new();
+        gss_roots.push_back(gss_root.id);
+        gss_map.insert(gss_root.id, gss_root);
+        while let Some(tok_res) = token_iter.next() {
+            match tok_res {
+                Ok(tok) => {
+                    self.parse_token(&mut gss_roots, &mut gss_map, &mut gss_constructor, tok);
+                }
+                Err(e) => {
+                    return Err(format!("Lexing Error: {e}"));
+                }
+            }
+        }
+        self.handle_end_reductions(&mut gss_roots, &mut gss_map, &mut gss_constructor);
+        println!("GSS Map: {:?}", gss_map);
+        println!("___________________________________________________________________________");
+        println!("GSS roots: {:?}", gss_roots);
+        println!("___________________________________________________________________________");
+        println!("States: {:?}", self.states);
+        let final_root = gss_roots.into_iter().find(|r| {
+            self.states
+                .get(&gss_map.get(r).unwrap().state.unwrap())
+                .unwrap()
+                .is_accept_state
+        });
+        match final_root {
+            Some(root) => {
+                let root = gss_map.remove(&root).unwrap();
+                Ok(root.cst_node.unwrap())
+            }
+            None => Err("Parsing failed: no valid parse found.".to_string()),
+        }
+    }
+
+    fn parse_token<K>(
+        &self,
+        gss_roots: &mut VecDeque<usize>,
+        gss_map: &mut HashMap<NodeId, GssNode>,
+        gss_constructor: &mut StateConstructor,
+        tok: K,
+    ) where
+        K: Parsable,
+    {
+        println!("Parsing Token: {:?}", tok.get_name());
+        let mut next_gss_roots: VecDeque<NodeId> = VecDeque::new();
+        while let Some(root_id) = gss_roots.pop_front() {
+            println!("Root ID: {:?}", root_id);
+            let root = gss_map.get(&root_id).unwrap();
+            let current_state_id = root.state.unwrap();
+            let current_state = self.states.get(&current_state_id).unwrap();
+            let mut terminals_to_process = Vec::new();
+            if let Some(toks) = self.grammar.get_token_replacements(tok.get_name()) {
+                terminals_to_process.extend(toks);
+            } else {
+                terminals_to_process.push(tok.get_name());
+            }
+            println!("Terminals to process: {:?}", terminals_to_process);
+            println!("Current State: {:?}", current_state);
+            for terminal in terminals_to_process {
+                self.process_shift(
+                    current_state,
+                    terminal,
+                    &tok,
+                    root_id,
+                    &mut next_gss_roots,
+                    gss_map,
+                    gss_constructor,
+                );
+                for reduction in &current_state.reductions {
+                    self.process_reduction(
+                        reduction,
+                        Some(terminal),
+                        root_id,
+                        gss_map,
+                        gss_constructor,
+                        gss_roots,
+                    );
+                }
+            }
+        }
+        println!("Next gss roots: {:?}", next_gss_roots);
+        *gss_roots = next_gss_roots;
+    }
+
+    fn handle_end_reductions(
+        &self,
+        gss_roots: &mut VecDeque<usize>,
+        gss_map: &mut HashMap<NodeId, GssNode>,
+        gss_constructor: &mut StateConstructor,
+    ) {
+        let mut next_gss_roots: VecDeque<NodeId> = VecDeque::new();
+        while let Some(root_id) = gss_roots.pop_front() {
+            let root = gss_map.get(&root_id).unwrap();
+            let current_state_id = root.state.unwrap();
+            let current_state = self.states.get(&current_state_id).unwrap();
+            println!("Current State: {:?}", current_state);
+            //Need to get gss_root when there is no more reductions left to do
+            for reduction in &current_state.reductions {
+                self.process_reduction(
+                    reduction,
+                    None,
+                    root_id,
+                    gss_map,
+                    gss_constructor,
+                    gss_roots,
+                );
+            }
+            if !gss_roots.is_empty() {
+                next_gss_roots = gss_roots.clone();
+            }
+        }
+        println!("Next gss roots: {:?}", next_gss_roots);
+        *gss_roots = next_gss_roots;
+    }
+
+    fn process_shift<K>(
+        &self,
+        current_state: &State,
+        terminal: &String,
+        tok: &K,
+        root_id: usize,
+        next_gss_roots: &mut VecDeque<NodeId>,
+        gss_map: &mut HashMap<NodeId, GssNode>,
+        gss_constructor: &mut StateConstructor,
+    ) where
+        K: Parsable,
+    {
+        if let Some(next_state_id) = current_state
+            .transitions
+            .get(&Symbol::Terminal(terminal.clone()))
+        {
+            //Need to check if the internals of another gss node in next roots already matches for consolidation
+            let new_cst_node = CSTNode::new(terminal.clone(), tok.get_match().clone());
+            let state = *next_state_id;
+            let parents = vec![root_id];
+            let mut found = false;
+            for id in &*next_gss_roots {
+                let gss_node = gss_map.get_mut(&id).unwrap();
+                if let Some(cst_node) = &gss_node.cst_node {
+                    if (gss_node.state == Some(state)) & (&new_cst_node == cst_node) {
+                        match &mut gss_node.parents {
+                            Some(node_parents) => {
+                                node_parents.extend(parents.clone());
+                                found = true;
+                                break;
+                            }
+                            None => {
+                                gss_node.set_parents(parents.clone());
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if !found {
+                let mut new_gss_node = gss_constructor.new_state::<GssNode>();
+                new_gss_node.set_state(state);
+                new_gss_node.set_parents(parents);
+                new_gss_node.set_cst_node(new_cst_node);
+                next_gss_roots.push_back(new_gss_node.id);
+                gss_map.insert(new_gss_node.id, new_gss_node);
+            }
+        }
+    }
+
+    fn process_reduction(
+        &self,
+        reduction: &(String, usize),
+        terminal: Option<&String>,
+        root_id: usize,
+        gss_map: &mut HashMap<NodeId, GssNode>,
+        gss_constructor: &mut StateConstructor,
+        gss_roots: &mut VecDeque<NodeId>,
+    ) {
+        let to_reduce = match terminal {
+            Some(terminal) => self.follows.get(&reduction.0).unwrap().contains(terminal),
+            None => true,
+        };
+        if to_reduce {
+            let rule_len = reduction.1;
+            println!("Rule Len: {}", rule_len);
+            let (paths, path_cst_nodes) = find_reduction_paths(root_id, rule_len, gss_map);
+            println!("Path CST Nodes: {:?}", path_cst_nodes);
+            let new_cst_node = match path_cst_nodes.len() {
+                1 => CSTNode {
+                    name: reduction.0.clone(),
+                    value: None,
+                    children: Some(CSTChildren::Single({
+                        let mut arr =
+                            path_cst_nodes[0].clone()[0..(path_cst_nodes[0].len() - 1)].to_vec();
+                        arr.reverse();
+                        arr
+                    })),
+                },
+                _ => CSTNode {
+                    name: reduction.0.clone(),
+                    value: None,
+                    children: Some(CSTChildren::Ambiguous(
+                        path_cst_nodes
+                            .into_iter()
+                            .map(|path| {
+                                let mut arr = path[0..(path.len() - 1)].to_vec();
+                                arr.reverse();
+                                arr
+                            })
+                            .collect(),
+                    )),
+                },
+            };
+            println!("New CST Node: {:?}", new_cst_node);
+            for path in paths {
+                let start_node_id = path.last().unwrap();
+                let start_node = gss_map.get(start_node_id).unwrap();
+                let start_state = self.states.get(&start_node.state.unwrap()).unwrap();
+                println!("Start State: {:?}", start_state);
+                if let Some(next_state_id) = start_state
+                    .transitions
+                    .get(&Symbol::NonTerminal(reduction.0.clone()))
+                {
+                    let mut new_gss_node = gss_constructor.new_state::<GssNode>();
+                    new_gss_node.set_state(*next_state_id);
+                    new_gss_node.set_parents(vec![*start_node_id]);
+                    new_gss_node.set_cst_node(new_cst_node.clone());
+                    gss_roots.push_back(new_gss_node.id);
+                    gss_map.insert(new_gss_node.id, new_gss_node);
+                }
+            }
+        }
+    }
+}
+
+fn find_reduction_paths(
+    end_node_id: NodeId,
+    mut len: usize,
+    gss_map: &HashMap<NodeId, GssNode>,
+) -> (Vec<Vec<NodeId>>, Vec<Vec<CSTNode>>) {
+    let mut paths: VecDeque<Vec<(NodeId, CSTNode)>> = VecDeque::new();
+    println!("End Node ID: {end_node_id}");
+    paths.push_back(vec![(
+        end_node_id,
+        gss_map.get(&end_node_id).unwrap().cst_node.clone().unwrap(),
+    )]);
+    println!("Initial Paths: {:?}", paths);
+    while len > 0 {
+        let mut next_paths: VecDeque<Vec<(NodeId, CSTNode)>> = VecDeque::new();
+        while let Some(mut path) = paths.pop_back() {
+            let (gss_node_id, cst_node) = &path.last().unwrap();
+            let gss_node = gss_map.get(gss_node_id).unwrap();
+            let parent_node_id = gss_node.parents.as_ref().unwrap().first().unwrap();
+            let parent_cst_node = gss_map
+                .get(parent_node_id)
+                .unwrap()
+                .cst_node
+                .clone()
+                .unwrap();
+            path.push((*parent_node_id, parent_cst_node));
+            if gss_node.parents.as_ref().unwrap().len() > 1 {
+                let parents = gss_node.parents.as_ref().unwrap()[1..].to_vec();
+                for parent_node_id in parents {
+                    let parent_cst_node = gss_map
+                        .get(&parent_node_id)
+                        .unwrap()
+                        .cst_node
+                        .clone()
+                        .unwrap();
+                    let mut new_path = path[0..(path.len() - 1)].to_vec();
+                    new_path.push((parent_node_id, parent_cst_node));
+                    next_paths.push_back(new_path);
+                }
+            }
+            next_paths.push_back(path);
+        }
+        paths = next_paths;
+        len -= 1;
+    }
+    let mut node_ids_vec: Vec<Vec<NodeId>> = Vec::new();
+    let mut cst_nodes_vec: Vec<Vec<CSTNode>> = Vec::new();
+    for inner_vec in paths {
+        let mut inner_node_ids: Vec<NodeId> = Vec::new();
+        let mut inner_cst_nodes: Vec<CSTNode> = Vec::new();
+        for (node_id, cst_node) in inner_vec {
+            inner_node_ids.push(node_id);
+            inner_cst_nodes.push(cst_node);
+        }
+        node_ids_vec.push(inner_node_ids);
+        cst_nodes_vec.push(inner_cst_nodes);
+    }
+    (node_ids_vec, cst_nodes_vec)
 }
 
 fn construct_firsts_follows(
@@ -163,7 +530,7 @@ fn construct_firsts_follows(
 fn construct_states(grammar: &Grammar) -> (HashMap<NodeId, State>, NodeId) {
     let mut production_map: HashMap<Vec<ProductionRule>, State> = HashMap::new();
     let mut state_constructor = StateConstructor::new();
-    let mut start_state = state_constructor.new_state();
+    let mut start_state = state_constructor.new_state::<State>();
     let start_id = start_state.id;
     start_state.production_rules = get_closure(
         "S'",
@@ -171,7 +538,6 @@ fn construct_states(grammar: &Grammar) -> (HashMap<NodeId, State>, NodeId) {
         0,
         grammar,
     );
-    start_state.is_accept_state = true;
 
     let mut states_to_process = VecDeque::new();
     states_to_process.push_back(start_state);
@@ -204,7 +570,7 @@ fn construct_states(grammar: &Grammar) -> (HashMap<NodeId, State>, NodeId) {
             if production_map.contains_key(&rules) {
                 transitions.insert(symbol, production_map.get(&rules).unwrap().id);
             } else {
-                let mut new_state = state_constructor.new_state();
+                let mut new_state = state_constructor.new_state::<State>();
                 new_state.production_rules = rules;
                 transitions.insert(symbol, new_state.id);
                 states_to_process.push_back(new_state);
@@ -215,10 +581,17 @@ fn construct_states(grammar: &Grammar) -> (HashMap<NodeId, State>, NodeId) {
         production_map.insert(state.production_rules.clone(), state);
     }
 
-    let state_map = production_map
+    let mut state_map: HashMap<usize, State> = production_map
         .into_values()
         .map(|state| (state.id, state))
         .collect();
+    let start_state = state_map.get_mut(&start_id).unwrap();
+    let mut end_state = state_constructor.new_state::<State>();
+    end_state.is_accept_state = true;
+    start_state
+        .transitions
+        .insert(Symbol::NonTerminal("S'".to_string()), end_state.id);
+    state_map.insert(end_state.id, end_state);
     (state_map, start_id)
 }
 
@@ -261,6 +634,29 @@ fn get_closure(
 mod tests {
     use super::*;
     use crate::parser::grammar;
+
+    #[derive(Debug, Clone)]
+    struct MockToken {
+        name: String,
+        value: Option<String>,
+    }
+
+    impl Parsable for MockToken {
+        fn get_name(&self) -> &String {
+            &self.name
+        }
+        fn get_match(&self) -> &Option<String> {
+            &self.value
+        }
+
+        fn get_col(&self) -> usize {
+            0
+        }
+
+        fn get_row(&self) -> usize {
+            0
+        }
+    }
 
     #[test]
     fn test_glr_creation_simple_grammar() {
@@ -310,7 +706,7 @@ mod tests {
 
         let states = glr_parser.states;
 
-        let start_state = states.values().find(|s| s.is_accept_state).unwrap();
+        let start_state = states.get(&glr_parser.start_state_id).unwrap();
         // S' -> .S, S -> .AB, A -> .a
         assert!(
             start_state
@@ -326,6 +722,11 @@ mod tests {
             start_state
                 .transitions
                 .contains_key(&Symbol::Terminal("a".to_string()))
+        );
+        assert!(
+            start_state
+                .transitions
+                .contains_key(&Symbol::NonTerminal("S'".to_string()))
         );
 
         let state_after_a_id = *start_state
@@ -407,7 +808,7 @@ mod tests {
         // S -> .A
         // A -> .B
         // B -> .c
-        let start_state = states.values().find(|s| s.is_accept_state).unwrap();
+        let start_state = states.get(&glr_parser.start_state_id).unwrap();
 
         assert!(
             start_state
@@ -500,7 +901,7 @@ mod tests {
         let glr_parser = Glr::new(grammar).unwrap();
         let states = glr_parser.states;
 
-        let start_state = states.values().find(|s| s.is_accept_state).unwrap();
+        let start_state = states.get(&glr_parser.start_state_id).unwrap();
         assert!((states.len() > 0) & (states.len() < 20));
         assert!(
             start_state
@@ -517,5 +918,76 @@ mod tests {
                 .transitions
                 .contains_key(&Symbol::NonTerminal("T".to_string()))
         );
+    }
+
+    #[test]
+    fn test_parse_successful_unambiguous() {
+        // Grammar: S -> A B, A -> a, B -> b
+        let start_symbol = String::from("S");
+        let production_rules = vec![
+            grammar::ProductionRule::new(
+                "S".to_string(),
+                vec![
+                    Symbol::NonTerminal("A".to_string()),
+                    Symbol::NonTerminal("B".to_string()),
+                ],
+            ),
+            grammar::ProductionRule::new("A".to_string(), vec![Symbol::Terminal("a".to_string())]),
+            grammar::ProductionRule::new("B".to_string(), vec![Symbol::Terminal("b".to_string())]),
+        ];
+        let grammar = Grammar::new(
+            start_symbol,
+            vec!["a".to_string(), "b".to_string()],
+            production_rules,
+            Vec::new(),
+        )
+        .unwrap();
+        let glr_parser = Glr::new(grammar).unwrap();
+
+        let tokens = vec![
+            Ok(MockToken {
+                name: "a".to_string(),
+                value: Some("a_val".to_string()),
+            }),
+            Ok(MockToken {
+                name: "b".to_string(),
+                value: Some("b_val".to_string()),
+            }),
+        ];
+
+        let result = glr_parser.parse(tokens.into_iter());
+        println!("{:?}", result);
+        assert!(result.is_ok());
+
+        let cst = result.unwrap();
+        let expected_cst_children = CSTChildren::Single(vec![
+            CSTNode {
+                name: "A".to_string(),
+                value: None,
+                children: Some(CSTChildren::Single(vec![CSTNode::new(
+                    "a".to_string(),
+                    Some("a_val".to_string()),
+                )])),
+            },
+            CSTNode {
+                name: "B".to_string(),
+                value: None,
+                children: Some(CSTChildren::Single(vec![CSTNode::new(
+                    "b".to_string(),
+                    Some("b_val".to_string()),
+                )])),
+            },
+        ]);
+        let expected_cst_start = CSTChildren::Single(vec![CSTNode {
+            name: "S".to_string(),
+            value: None,
+            children: Some(expected_cst_children),
+        }]);
+        let expected_cst = CSTNode {
+            name: "S'".to_string(),
+            value: None,
+            children: Some(expected_cst_start),
+        };
+        assert_eq!(cst, expected_cst);
     }
 }
