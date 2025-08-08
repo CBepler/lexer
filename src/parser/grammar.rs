@@ -177,6 +177,10 @@ impl Grammar {
             ambiguous_tokens,
         )
     }
+
+    pub fn get_token_replacements(&self, tok: &String) -> Option<&Vec<String>> {
+        self.ambiguous_tokens.get(tok)
+    }
 }
 
 #[cfg(test)]
