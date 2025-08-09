@@ -108,6 +108,27 @@ impl CSTChildren {
         }
         false
     }
+
+    fn combine(self, other: Self) -> Self {
+        let mut children = Vec::new();
+        match self {
+            CSTChildren::Single(child) => {
+                children.push(child);
+            }
+            CSTChildren::Ambiguous(a_children) => {
+                children.extend(a_children);
+            }
+        }
+        match other {
+            CSTChildren::Single(child) => {
+                children.push(child);
+            }
+            CSTChildren::Ambiguous(a_children) => {
+                children.extend(a_children);
+            }
+        }
+        CSTChildren::Ambiguous(children)
+    }
 }
 
 fn format_node_with_indent(f: &mut Formatter, node: &CSTNode, indent: usize) -> fmt::Result {
@@ -218,18 +239,13 @@ impl Glr {
                 }
             }
         }
-        self.handle_end_reductions(&mut gss_roots, &mut gss_map, &mut gss_constructor);
+        let final_root =
+            self.handle_end_reductions(&mut gss_roots, &mut gss_map, &mut gss_constructor);
         println!("GSS Map: {:?}", gss_map);
         println!("___________________________________________________________________________");
         println!("GSS roots: {:?}", gss_roots);
         println!("___________________________________________________________________________");
         println!("States: {:?}", self.states);
-        let final_root = gss_roots.into_iter().find(|r| {
-            self.states
-                .get(&gss_map.get(r).unwrap().state.unwrap())
-                .unwrap()
-                .is_accept_state
-        });
         match final_root {
             Some(root) => {
                 let root = gss_map.remove(&root).unwrap();
@@ -296,7 +312,8 @@ impl Glr {
         gss_roots: &mut VecDeque<usize>,
         gss_map: &mut HashMap<NodeId, GssNode>,
         gss_constructor: &mut StateConstructor,
-    ) {
+    ) -> Option<NodeId> {
+        println!("Handling End");
         let mut next_gss_roots: VecDeque<NodeId> = VecDeque::new();
         while let Some(root_id) = gss_roots.pop_front() {
             let root = gss_map.get(&root_id).unwrap();
@@ -304,7 +321,6 @@ impl Glr {
             let current_state = self.states.get(&current_state_id).unwrap();
             println!("Root Id: {root_id}");
             println!("Current State: {:?}", current_state);
-            //Need to get gss_root when there is no more reductions left to do
             for reduction in &current_state.reductions {
                 self.process_reduction(
                     reduction,
@@ -315,12 +331,39 @@ impl Glr {
                     gss_roots,
                 );
             }
-            if !gss_roots.is_empty() {
-                next_gss_roots = gss_roots.clone();
+            if (current_state.is_accept_state) & !(next_gss_roots.contains(&root_id)) {
+                next_gss_roots.push_back(root_id);
             }
+            println!("Next gss roots: {:?}", next_gss_roots);
         }
-        println!("Next gss roots: {:?}", next_gss_roots);
-        *gss_roots = next_gss_roots;
+        println!("Next gss roots Final: {:?}", next_gss_roots);
+        if next_gss_roots.is_empty() {
+            return None;
+        }
+        let mut final_root = gss_constructor.new_state::<GssNode>();
+        final_root.cst_node = Some(CSTNode::new("S'".to_string(), None));
+        final_root.cst_node.as_mut().unwrap().children = gss_map
+            .get(&next_gss_roots.pop_front().unwrap())
+            .unwrap()
+            .cst_node
+            .clone()
+            .unwrap()
+            .children;
+        while let Some(id) = next_gss_roots.pop_front() {
+            let cst_node = gss_map.get(&id).unwrap().cst_node.clone().unwrap();
+            final_root.cst_node.as_mut().unwrap().children = Some(
+                final_root
+                    .cst_node
+                    .clone()
+                    .unwrap()
+                    .children
+                    .unwrap()
+                    .combine(cst_node.children.unwrap()),
+            );
+        }
+        let id = final_root.id;
+        gss_map.insert(final_root.id, final_root);
+        Some(id)
     }
 
     fn process_shift<K>(
@@ -347,7 +390,7 @@ impl Glr {
                 next_gss_roots,
                 gss_map,
                 next_state_id,
-                &new_cst_node,
+                new_cst_node,
                 parents,
                 gss_constructor,
             );
@@ -399,7 +442,7 @@ impl Glr {
                         gss_roots,
                         gss_map,
                         next_state_id,
-                        &new_cst_node,
+                        new_cst_node,
                         parents,
                         gss_constructor,
                     );
@@ -430,7 +473,7 @@ fn find_and_insert_gss_node(
     gss_roots: &mut VecDeque<NodeId>,
     gss_map: &mut HashMap<NodeId, GssNode>,
     check_state_id: &NodeId,
-    new_cst_node: &CSTNode,
+    new_cst_node: CSTNode,
     parents: Vec<NodeId>,
     gss_constructor: &mut StateConstructor,
 ) -> NodeId {
@@ -446,6 +489,19 @@ fn find_and_insert_gss_node(
                 }
                 None => {
                     gss_node.set_parents(parents.clone());
+                }
+            }
+            if new_cst_node.children.is_some() {
+                match &mut gss_node.cst_node.as_mut().unwrap().children {
+                    Some(children) => {
+                        let children = children.clone();
+                        gss_node.cst_node.as_mut().unwrap().children =
+                            Some(children.combine(new_cst_node.children.unwrap()));
+                    }
+                    None => {
+                        gss_node.cst_node.as_mut().unwrap().children =
+                            new_cst_node.children.clone();
+                    }
                 }
             }
             id
@@ -1115,72 +1171,197 @@ mod tests {
         assert!(result.is_ok());
 
         let cst = result.unwrap();
-        println!("CST: {:?}", cst);
-        println!("CST: {cst}");
-        // The final result should indicate ambiguity at the top level
-        assert_eq!(cst.name, "S'");
-        if let Some(CSTChildren::Ambiguous(ref children)) = cst.children {
-            assert_eq!(children.len(), 2);
-            // We can check for the two distinct parse trees
-            // Left-associative: E -> (E + E) -> ((E) + E) -> (id + id)
-            // Right-associative: E -> (E + E) -> (E + (E)) -> (id + id)
-            // The order of the parse trees is not guaranteed, so we check for the existence of both forms.
-            let first_child_is_left_associative = children[0][0].name == "E"
-                && children[0][1].name == "+"
-                && children[0][2].name == "E"
-                && children[0][0].children.as_ref().unwrap().is_single();
+        println!("CST: {}", cst);
 
-            let second_child_is_right_associative = children[1][0].name == "E"
-                && children[1][1].name == "+"
-                && children[1][2].name == "E"
-                && children[1][2].children.as_ref().unwrap().is_single();
-            assert!(first_child_is_left_associative || second_child_is_right_associative);
-        } else {
-            panic!("Expected ambiguous children for parse tree");
+        // The final result should indicate ambiguity at the top level, on the S' node itself.
+        assert_eq!(cst.name, "S'");
+        assert!(cst.children.is_some());
+
+        // The S' node's children should be the ambiguous paths directly.
+        let ambiguous_paths = match cst.children.as_ref().unwrap() {
+            CSTChildren::Ambiguous(paths) => paths,
+            _ => panic!("Expected Ambiguous children for S' node"),
+        };
+        assert_eq!(ambiguous_paths.len(), 2);
+
+        // Helper closure to check for the left-associative tree structure
+        let is_left_associative = |path: &Vec<CSTNode>| -> bool {
+            // Path should have one top-level E node for S' -> E
+            if path.len() != 1 || path[0].name != "E" {
+                return false;
+            }
+
+            let Some(CSTChildren::Single(nodes)) = path[0].children.as_ref() else {
+                return false;
+            };
+
+            // The children of this E should be E, +, E
+            if nodes.len() != 3
+                || nodes[0].name != "E"
+                || nodes[1].name != "+"
+                || nodes[2].name != "E"
+            {
+                return false;
+            }
+
+            // The first E should represent (x + y)
+            let Some(CSTChildren::Single(nodes_inner)) = nodes[0].children.as_ref() else {
+                return false;
+            };
+            if nodes_inner.len() != 3
+                || nodes_inner[0].name != "E"
+                || nodes_inner[1].name != "+"
+                || nodes_inner[2].name != "E"
+            {
+                return false;
+            }
+
+            // Check for the leaf nodes 'x' and 'y'
+            let Some(CSTChildren::Single(leaf_x)) = nodes_inner[0].children.as_ref() else {
+                return false;
+            };
+            if leaf_x.len() != 1 || leaf_x[0].value != Some("x".to_string()) {
+                return false;
+            }
+
+            let Some(CSTChildren::Single(leaf_y)) = nodes_inner[2].children.as_ref() else {
+                return false;
+            };
+            if leaf_y.len() != 1 || leaf_y[0].value != Some("y".to_string()) {
+                return false;
+            }
+
+            // The last E should represent 'z'
+            let Some(CSTChildren::Single(leaf_z)) = nodes[2].children.as_ref() else {
+                return false;
+            };
+            if leaf_z.len() != 1 || leaf_z[0].value != Some("z".to_string()) {
+                return false;
+            }
+
+            true
+        };
+
+        // Helper closure to check for the right-associative tree structure
+        let is_right_associative = |path: &Vec<CSTNode>| -> bool {
+            // Path should have one top-level E node for S' -> E
+            if path.len() != 1 || path[0].name != "E" {
+                return false;
+            }
+
+            let Some(CSTChildren::Single(nodes)) = path[0].children.as_ref() else {
+                return false;
+            };
+
+            // The children of this E should be E, +, E
+            if nodes.len() != 3
+                || nodes[0].name != "E"
+                || nodes[1].name != "+"
+                || nodes[2].name != "E"
+            {
+                return false;
+            }
+
+            // The first E should represent 'x'
+            let Some(CSTChildren::Single(leaf_x)) = nodes[0].children.as_ref() else {
+                return false;
+            };
+            if leaf_x.len() != 1 || leaf_x[0].value != Some("x".to_string()) {
+                return false;
+            }
+
+            // The last E should represent (y + z)
+            let Some(CSTChildren::Single(nodes_inner)) = nodes[2].children.as_ref() else {
+                return false;
+            };
+            if nodes_inner.len() != 3
+                || nodes_inner[0].name != "E"
+                || nodes_inner[1].name != "+"
+                || nodes_inner[2].name != "E"
+            {
+                return false;
+            }
+
+            // Check for the leaf nodes 'y' and 'z'
+            let Some(CSTChildren::Single(leaf_y)) = nodes_inner[0].children.as_ref() else {
+                return false;
+            };
+            if leaf_y.len() != 1 || leaf_y[0].value != Some("y".to_string()) {
+                return false;
+            }
+
+            let Some(CSTChildren::Single(leaf_z)) = nodes_inner[2].children.as_ref() else {
+                return false;
+            };
+            if leaf_z.len() != 1 || leaf_z[0].value != Some("z".to_string()) {
+                return false;
+            }
+
+            true
+        };
+
+        // The order of the paths is not guaranteed, so we check for the existence of both forms.
+        let mut found_left = false;
+        let mut found_right = false;
+
+        for path in ambiguous_paths {
+            if is_left_associative(path) {
+                found_left = true;
+            } else if is_right_associative(path) {
+                found_right = true;
+            }
         }
+
+        println!("Found Left: {found_left}");
+        println!("Found Right: {found_right}");
+
+        assert!(
+            found_left && found_right,
+            "Both left and right associative parse trees were not found."
+        );
     }
 
-    // #[test]
-    // fn test_parse_failure_invalid_input() {
-    //     // Grammar: S -> a b
-    //     let start_symbol = String::from("S");
-    //     let production_rules = vec![
-    //         grammar::ProductionRule::new(
-    //             "S".to_string(),
-    //             vec![
-    //                 Symbol::NonTerminal("A".to_string()),
-    //                 Symbol::NonTerminal("B".to_string()),
-    //             ],
-    //         ),
-    //         grammar::ProductionRule::new("A".to_string(), vec![Symbol::Terminal("a".to_string())]),
-    //         grammar::ProductionRule::new("B".to_string(), vec![Symbol::Terminal("b".to_string())]),
-    //     ];
-    //     let grammar = Grammar::new(
-    //         start_symbol,
-    //         vec!["a".to_string(), "b".to_string()],
-    //         production_rules,
-    //         Vec::new(),
-    //     )
-    //     .unwrap();
-    //     let glr_parser = Glr::new(grammar).unwrap();
+    #[test]
+    fn test_parse_failure_invalid_input() {
+        // Grammar: S -> a b
+        let start_symbol = String::from("S");
+        let production_rules = vec![
+            grammar::ProductionRule::new(
+                "S".to_string(),
+                vec![
+                    Symbol::NonTerminal("A".to_string()),
+                    Symbol::NonTerminal("B".to_string()),
+                ],
+            ),
+            grammar::ProductionRule::new("A".to_string(), vec![Symbol::Terminal("a".to_string())]),
+            grammar::ProductionRule::new("B".to_string(), vec![Symbol::Terminal("b".to_string())]),
+        ];
+        let grammar = Grammar::new(
+            start_symbol,
+            vec!["a".to_string(), "b".to_string()],
+            production_rules,
+            Vec::new(),
+        )
+        .unwrap();
+        let glr_parser = Glr::new(grammar).unwrap();
 
-    //     // Invalid input: 'a' followed by 'a'
-    //     let tokens = vec![
-    //         Ok(MockToken {
-    //             name: "a".to_string(),
-    //             value: Some("a_val1".to_string()),
-    //         }),
-    //         Ok(MockToken {
-    //             name: "a".to_string(),
-    //             value: Some("a_val2".to_string()),
-    //         }),
-    //     ];
+        // Invalid input: 'a' followed by 'a'
+        let tokens = vec![
+            Ok(MockToken {
+                name: "a".to_string(),
+                value: Some("a_val1".to_string()),
+            }),
+            Ok(MockToken {
+                name: "a".to_string(),
+                value: Some("a_val2".to_string()),
+            }),
+        ];
 
-    //     let result = glr_parser.parse(tokens.into_iter());
-    //     assert!(result.is_err());
-    //     assert_eq!(
-    //         result.unwrap_err(),
-    //         "Parsing failed: no valid paths remain.".to_string()
-    //     );
-    // }
+        let result = glr_parser.parse(tokens.into_iter());
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Parsing failed: no valid parse found.".to_string()
+        );
+    }
 }
