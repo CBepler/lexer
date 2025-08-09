@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    f32::consts::E,
+    fmt::{self, Display, Formatter},
+    ptr::NonNull,
 };
 
 use crate::{
@@ -87,10 +88,55 @@ impl CSTNode {
     }
 }
 
+impl Display for CSTNode {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        // Start the formatting with the root node at indentation level 0.
+        format_node_with_indent(f, self, 0)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 enum CSTChildren {
     Single(Vec<CSTNode>),
     Ambiguous(Vec<Vec<CSTNode>>),
+}
+
+impl CSTChildren {
+    fn is_single(&self) -> bool {
+        if let CSTChildren::Single(_) = self {
+            return true;
+        }
+        false
+    }
+}
+
+fn format_node_with_indent(f: &mut Formatter, node: &CSTNode, indent: usize) -> fmt::Result {
+    write!(f, "{:indent$}", "", indent = indent * 4)?;
+
+    match &node.value {
+        Some(val) => writeln!(f, "- {}: {}", node.name, val)?,
+        None => writeln!(f, "- {}", node.name)?,
+    };
+
+    if let Some(children) = &node.children {
+        match children {
+            CSTChildren::Single(nodes) => {
+                for child in nodes {
+                    format_node_with_indent(f, child, indent + 2)?;
+                }
+            }
+            CSTChildren::Ambiguous(ambiguous_nodes) => {
+                writeln!(f, "{:indent$}  (Ambiguous Paths):", "", indent = indent * 4)?;
+                for (i, path) in ambiguous_nodes.iter().enumerate() {
+                    writeln!(f, "{:indent$}    Path {}:", "", i)?;
+                    for child in path {
+                        format_node_with_indent(f, child, indent + 2)?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -217,6 +263,7 @@ impl Glr {
             }
             println!("Terminals to process: {:?}", terminals_to_process);
             println!("Current State: {:?}", current_state);
+            //Need to handle shift-reduce ambiguities
             for terminal in terminals_to_process {
                 self.process_shift(
                     current_state,
@@ -227,6 +274,7 @@ impl Glr {
                     gss_map,
                     gss_constructor,
                 );
+                println!("Next gss roots: {:?}", next_gss_roots);
                 for reduction in &current_state.reductions {
                     self.process_reduction(
                         reduction,
@@ -239,7 +287,7 @@ impl Glr {
                 }
             }
         }
-        println!("Next gss roots: {:?}", next_gss_roots);
+        println!("Next gss roots Final: {:?}", next_gss_roots);
         *gss_roots = next_gss_roots;
     }
 
@@ -254,6 +302,7 @@ impl Glr {
             let root = gss_map.get(&root_id).unwrap();
             let current_state_id = root.state.unwrap();
             let current_state = self.states.get(&current_state_id).unwrap();
+            println!("Root Id: {root_id}");
             println!("Current State: {:?}", current_state);
             //Need to get gss_root when there is no more reductions left to do
             for reduction in &current_state.reductions {
@@ -294,34 +343,14 @@ impl Glr {
             let new_cst_node = CSTNode::new(terminal.clone(), tok.get_match().clone());
             let state = *next_state_id;
             let parents = vec![root_id];
-            let mut found = false;
-            for id in &*next_gss_roots {
-                let gss_node = gss_map.get_mut(&id).unwrap();
-                if let Some(cst_node) = &gss_node.cst_node {
-                    if (gss_node.state == Some(state)) & (&new_cst_node == cst_node) {
-                        match &mut gss_node.parents {
-                            Some(node_parents) => {
-                                node_parents.extend(parents.clone());
-                                found = true;
-                                break;
-                            }
-                            None => {
-                                gss_node.set_parents(parents.clone());
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            if !found {
-                let mut new_gss_node = gss_constructor.new_state::<GssNode>();
-                new_gss_node.set_state(state);
-                new_gss_node.set_parents(parents);
-                new_gss_node.set_cst_node(new_cst_node);
-                next_gss_roots.push_back(new_gss_node.id);
-                gss_map.insert(new_gss_node.id, new_gss_node);
-            }
+            find_and_insert_gss_node(
+                next_gss_roots,
+                gss_map,
+                next_state_id,
+                &new_cst_node,
+                parents,
+                gss_constructor,
+            );
         }
     }
 
@@ -339,54 +368,97 @@ impl Glr {
             None => true,
         };
         if to_reduce {
+            println!("Reduction: {:?}", reduction);
             let rule_len = reduction.1;
             println!("Rule Len: {}", rule_len);
             let (paths, path_cst_nodes) = find_reduction_paths(root_id, rule_len, gss_map);
+            println!("Paths: {:?}", paths);
             println!("Path CST Nodes: {:?}", path_cst_nodes);
-            let new_cst_node = match path_cst_nodes.len() {
-                1 => CSTNode {
+            for (idx, path) in paths.iter().enumerate() {
+                let start_node_id = path.last().unwrap();
+                let start_node = gss_map.get(start_node_id).unwrap();
+                let start_state = self.states.get(&start_node.state.unwrap()).unwrap();
+                let new_cst_node = CSTNode {
                     name: reduction.0.clone(),
                     value: None,
                     children: Some(CSTChildren::Single({
                         let mut arr =
-                            path_cst_nodes[0].clone()[0..(path_cst_nodes[0].len() - 1)].to_vec();
+                            path_cst_nodes[idx].clone()[0..(path_cst_nodes[0].len() - 1)].to_vec();
                         arr.reverse();
                         arr
                     })),
-                },
-                _ => CSTNode {
-                    name: reduction.0.clone(),
-                    value: None,
-                    children: Some(CSTChildren::Ambiguous(
-                        path_cst_nodes
-                            .into_iter()
-                            .map(|path| {
-                                let mut arr = path[0..(path.len() - 1)].to_vec();
-                                arr.reverse();
-                                arr
-                            })
-                            .collect(),
-                    )),
-                },
-            };
-            println!("New CST Node: {:?}", new_cst_node);
-            for path in paths {
-                let start_node_id = path.last().unwrap();
-                let start_node = gss_map.get(start_node_id).unwrap();
-                let start_state = self.states.get(&start_node.state.unwrap()).unwrap();
+                };
+                println!("New CST Node: {new_cst_node}");
                 println!("Start State: {:?}", start_state);
                 if let Some(next_state_id) = start_state
                     .transitions
                     .get(&Symbol::NonTerminal(reduction.0.clone()))
                 {
-                    let mut new_gss_node = gss_constructor.new_state::<GssNode>();
-                    new_gss_node.set_state(*next_state_id);
-                    new_gss_node.set_parents(vec![*start_node_id]);
-                    new_gss_node.set_cst_node(new_cst_node.clone());
-                    gss_roots.push_back(new_gss_node.id);
-                    gss_map.insert(new_gss_node.id, new_gss_node);
+                    let parents = vec![*start_node_id];
+                    find_and_insert_gss_node(
+                        gss_roots,
+                        gss_map,
+                        next_state_id,
+                        &new_cst_node,
+                        parents,
+                        gss_constructor,
+                    );
                 }
             }
+        }
+    }
+}
+
+fn find_existing_gss_node(
+    gss_roots: &mut VecDeque<NodeId>,
+    gss_map: &HashMap<NodeId, GssNode>,
+    check_state_id: &NodeId,
+    check_cst_node: &CSTNode,
+) -> Option<NodeId> {
+    for id in &*gss_roots {
+        let gss_node = gss_map.get(&id).unwrap();
+        if let Some(cst_node) = &gss_node.cst_node {
+            if (gss_node.state == Some(*check_state_id)) & (cst_node == check_cst_node) {
+                return Some(*id);
+            }
+        }
+    }
+    None
+}
+
+fn find_and_insert_gss_node(
+    gss_roots: &mut VecDeque<NodeId>,
+    gss_map: &mut HashMap<NodeId, GssNode>,
+    check_state_id: &NodeId,
+    new_cst_node: &CSTNode,
+    parents: Vec<NodeId>,
+    gss_constructor: &mut StateConstructor,
+) -> NodeId {
+    match find_existing_gss_node(gss_roots, gss_map, &*check_state_id, &new_cst_node) {
+        Some(id) => {
+            let gss_node = gss_map.get_mut(&id).unwrap();
+            println!("Gss Node before shift match: {:?}", gss_node);
+            println!("New Parents: {:?}", parents);
+            match &mut gss_node.parents {
+                Some(node_parents) => {
+                    node_parents.extend(parents.clone());
+                    println!("Gss Node after shift match: {:?}", gss_node);
+                }
+                None => {
+                    gss_node.set_parents(parents.clone());
+                }
+            }
+            id
+        }
+        None => {
+            let mut new_gss_node = gss_constructor.new_state::<GssNode>();
+            new_gss_node.set_state(*check_state_id);
+            new_gss_node.set_parents(parents);
+            new_gss_node.set_cst_node(new_cst_node.clone());
+            gss_roots.push_back(new_gss_node.id);
+            let id = new_gss_node.id;
+            gss_map.insert(new_gss_node.id, new_gss_node);
+            id
         }
     }
 }
@@ -524,6 +596,7 @@ fn construct_firsts_follows(
             }
         }
     }
+    follows.insert("S'".to_string(), HashSet::new());
     (firsts, follows)
 }
 
@@ -990,4 +1063,124 @@ mod tests {
         };
         assert_eq!(cst, expected_cst);
     }
+
+    #[test]
+    fn test_parse_ambiguous_grammar() {
+        // Grammar: E -> E + E | id
+        let start_symbol = String::from("E");
+        let production_rules = vec![
+            grammar::ProductionRule::new(
+                "E".to_string(),
+                vec![
+                    Symbol::NonTerminal("E".to_string()),
+                    Symbol::Terminal("+".to_string()),
+                    Symbol::NonTerminal("E".to_string()),
+                ],
+            ),
+            grammar::ProductionRule::new("E".to_string(), vec![Symbol::Terminal("id".to_string())]),
+        ];
+        let grammar = Grammar::new(
+            start_symbol,
+            vec!["+".to_string(), "id".to_string()],
+            production_rules,
+            Vec::new(),
+        )
+        .unwrap();
+        let glr_parser = Glr::new(grammar).unwrap();
+
+        let tokens = vec![
+            Ok(MockToken {
+                name: "id".to_string(),
+                value: Some("x".to_string()),
+            }),
+            Ok(MockToken {
+                name: "+".to_string(),
+                value: Some("+".to_string()),
+            }),
+            Ok(MockToken {
+                name: "id".to_string(),
+                value: Some("y".to_string()),
+            }),
+            Ok(MockToken {
+                name: "+".to_string(),
+                value: Some("+".to_string()),
+            }),
+            Ok(MockToken {
+                name: "id".to_string(),
+                value: Some("z".to_string()),
+            }),
+        ];
+
+        let result = glr_parser.parse(tokens.into_iter());
+        assert!(result.is_ok());
+
+        let cst = result.unwrap();
+        println!("CST: {:?}", cst);
+        println!("CST: {cst}");
+        // The final result should indicate ambiguity at the top level
+        assert_eq!(cst.name, "S'");
+        if let Some(CSTChildren::Ambiguous(ref children)) = cst.children {
+            assert_eq!(children.len(), 2);
+            // We can check for the two distinct parse trees
+            // Left-associative: E -> (E + E) -> ((E) + E) -> (id + id)
+            // Right-associative: E -> (E + E) -> (E + (E)) -> (id + id)
+            // The order of the parse trees is not guaranteed, so we check for the existence of both forms.
+            let first_child_is_left_associative = children[0][0].name == "E"
+                && children[0][1].name == "+"
+                && children[0][2].name == "E"
+                && children[0][0].children.as_ref().unwrap().is_single();
+
+            let second_child_is_right_associative = children[1][0].name == "E"
+                && children[1][1].name == "+"
+                && children[1][2].name == "E"
+                && children[1][2].children.as_ref().unwrap().is_single();
+            assert!(first_child_is_left_associative || second_child_is_right_associative);
+        } else {
+            panic!("Expected ambiguous children for parse tree");
+        }
+    }
+
+    // #[test]
+    // fn test_parse_failure_invalid_input() {
+    //     // Grammar: S -> a b
+    //     let start_symbol = String::from("S");
+    //     let production_rules = vec![
+    //         grammar::ProductionRule::new(
+    //             "S".to_string(),
+    //             vec![
+    //                 Symbol::NonTerminal("A".to_string()),
+    //                 Symbol::NonTerminal("B".to_string()),
+    //             ],
+    //         ),
+    //         grammar::ProductionRule::new("A".to_string(), vec![Symbol::Terminal("a".to_string())]),
+    //         grammar::ProductionRule::new("B".to_string(), vec![Symbol::Terminal("b".to_string())]),
+    //     ];
+    //     let grammar = Grammar::new(
+    //         start_symbol,
+    //         vec!["a".to_string(), "b".to_string()],
+    //         production_rules,
+    //         Vec::new(),
+    //     )
+    //     .unwrap();
+    //     let glr_parser = Glr::new(grammar).unwrap();
+
+    //     // Invalid input: 'a' followed by 'a'
+    //     let tokens = vec![
+    //         Ok(MockToken {
+    //             name: "a".to_string(),
+    //             value: Some("a_val1".to_string()),
+    //         }),
+    //         Ok(MockToken {
+    //             name: "a".to_string(),
+    //             value: Some("a_val2".to_string()),
+    //         }),
+    //     ];
+
+    //     let result = glr_parser.parse(tokens.into_iter());
+    //     assert!(result.is_err());
+    //     assert_eq!(
+    //         result.unwrap_err(),
+    //         "Parsing failed: no valid paths remain.".to_string()
+    //     );
+    // }
 }
