@@ -1,199 +1,25 @@
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    fmt::{self, Display, Formatter},
-    ptr::NonNull,
-};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::{
     Parsable,
-    parser::grammar::{AmbiguousToken, Grammar, Symbol},
+    parser::grammar::{Grammar, Symbol},
 };
 
-type NodeId = usize;
+pub use self::cst_node::{CSTChildren, CSTNode};
+use self::{
+    gss_node::GssNode,
+    state::{ProductionRule, State},
+    state_constructor::StateConstructor,
+};
 
-#[derive(Hash, PartialEq, Eq, Clone, Debug)]
-struct ProductionRule {
-    head: String,
-    body: Vec<Symbol>,
-    pos: usize,
-}
+pub mod cst_node;
+mod gss_node;
+mod state;
+mod state_constructor;
 
-impl ProductionRule {
-    fn new(head: String, body: Vec<Symbol>, pos: usize) -> Self {
-        ProductionRule { head, body, pos }
-    }
-}
+pub type NodeId = usize;
 
-#[derive(Debug)]
-struct State {
-    id: NodeId,
-    //terminal or non-terminal to next state
-    transitions: HashMap<Symbol, NodeId>,
-    //terminal to reductions with (non-terminal name, body length)
-    reductions: HashSet<(String, usize)>,
-    production_rules: Vec<ProductionRule>,
-    is_accept_state: bool,
-}
-
-impl IDConstructable for State {
-    fn new(id: NodeId) -> Self {
-        State {
-            id,
-            transitions: HashMap::new(),
-            reductions: HashSet::new(),
-            production_rules: Vec::new(),
-            is_accept_state: false,
-        }
-    }
-}
-
-trait IDConstructable {
-    fn new(id: NodeId) -> Self;
-}
-
-struct StateConstructor {
-    next_id: usize,
-}
-
-impl StateConstructor {
-    fn new() -> Self {
-        StateConstructor { next_id: 0 }
-    }
-
-    fn new_state<T>(&mut self) -> T
-    where
-        T: IDConstructable,
-    {
-        let id = self.next_id;
-        self.next_id += 1;
-        T::new(id)
-    }
-}
-
-//Concrete Syntax Tree
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-struct CSTNode {
-    name: String,
-    value: Option<String>,
-    children: Option<CSTChildren>,
-}
-
-impl CSTNode {
-    fn new(name: String, value: Option<String>) -> Self {
-        CSTNode {
-            name,
-            value,
-            children: None,
-        }
-    }
-}
-
-impl Display for CSTNode {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        // Start the formatting with the root node at indentation level 0.
-        format_node_with_indent(f, self, 0)
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-enum CSTChildren {
-    Single(Vec<CSTNode>),
-    Ambiguous(Vec<Vec<CSTNode>>),
-}
-
-impl CSTChildren {
-    fn is_single(&self) -> bool {
-        if let CSTChildren::Single(_) = self {
-            return true;
-        }
-        false
-    }
-
-    fn combine(self, other: Self) -> Self {
-        let mut children = Vec::new();
-        match self {
-            CSTChildren::Single(child) => {
-                children.push(child);
-            }
-            CSTChildren::Ambiguous(a_children) => {
-                children.extend(a_children);
-            }
-        }
-        match other {
-            CSTChildren::Single(child) => {
-                children.push(child);
-            }
-            CSTChildren::Ambiguous(a_children) => {
-                children.extend(a_children);
-            }
-        }
-        CSTChildren::Ambiguous(children)
-    }
-}
-
-fn format_node_with_indent(f: &mut Formatter, node: &CSTNode, indent: usize) -> fmt::Result {
-    write!(f, "{:indent$}", "", indent = indent * 4)?;
-
-    match &node.value {
-        Some(val) => writeln!(f, "- {}: {}", node.name, val)?,
-        None => writeln!(f, "- {}", node.name)?,
-    };
-
-    if let Some(children) = &node.children {
-        match children {
-            CSTChildren::Single(nodes) => {
-                for child in nodes {
-                    format_node_with_indent(f, child, indent + 2)?;
-                }
-            }
-            CSTChildren::Ambiguous(ambiguous_nodes) => {
-                writeln!(f, "{:indent$}  (Ambiguous Paths):", "", indent = indent * 4)?;
-                for (i, path) in ambiguous_nodes.iter().enumerate() {
-                    writeln!(f, "{:indent$}    Path {}:", "", i)?;
-                    for child in path {
-                        format_node_with_indent(f, child, indent + 2)?;
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-struct GssNode {
-    id: NodeId,
-    state: Option<NodeId>,
-    parents: Option<Vec<NodeId>>,
-    cst_node: Option<CSTNode>,
-}
-
-impl IDConstructable for GssNode {
-    fn new(id: NodeId) -> Self {
-        GssNode {
-            id,
-            state: None,
-            parents: None,
-            cst_node: None,
-        }
-    }
-}
-
-impl GssNode {
-    fn set_state(&mut self, state: NodeId) {
-        self.state = Some(state);
-    }
-
-    fn set_parents(&mut self, parents: Vec<NodeId>) {
-        self.parents = Some(parents);
-    }
-
-    fn set_cst_node(&mut self, cst_node: CSTNode) {
-        self.cst_node = Some(cst_node);
-    }
-}
-
-struct Glr {
+pub struct Glr {
     grammar: Grammar,
     //Map from non-terminals to terminals that can start them
     firsts: HashMap<String, HashSet<String>>,
@@ -384,7 +210,6 @@ impl Glr {
         {
             //Need to check if the internals of another gss node in next roots already matches for consolidation
             let new_cst_node = CSTNode::new(terminal.clone(), tok.get_match().clone());
-            let state = *next_state_id;
             let parents = vec![root_id];
             find_and_insert_gss_node(
                 next_gss_roots,
@@ -534,7 +359,7 @@ fn find_reduction_paths(
     while len > 0 {
         let mut next_paths: VecDeque<Vec<(NodeId, CSTNode)>> = VecDeque::new();
         while let Some(mut path) = paths.pop_back() {
-            let (gss_node_id, cst_node) = &path.last().unwrap();
+            let (gss_node_id, _cst_node) = &path.last().unwrap();
             let gss_node = gss_map.get(gss_node_id).unwrap();
             let parent_node_id = gss_node.parents.as_ref().unwrap().first().unwrap();
             let parent_cst_node = gss_map
@@ -1362,6 +1187,118 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             "Parsing failed: no valid parse found.".to_string()
+        );
+    }
+
+    #[test]
+    fn test_parse_ambiguous_tokens() {
+        // Grammar:
+        // S -> Decl | Assign
+        // Decl -> TYPE_DEF
+        // Assign -> VAR
+        let start_symbol = String::from("S");
+        let production_rules = vec![
+            grammar::ProductionRule::new(
+                "S".to_string(),
+                vec![Symbol::NonTerminal("Decl".to_string())],
+            ),
+            grammar::ProductionRule::new(
+                "S".to_string(),
+                vec![Symbol::NonTerminal("Assign".to_string())],
+            ),
+            grammar::ProductionRule::new(
+                "Decl".to_string(),
+                vec![Symbol::Terminal("TYPE_DEF".to_string())],
+            ),
+            grammar::ProductionRule::new(
+                "Assign".to_string(),
+                vec![Symbol::Terminal("VAR".to_string())],
+            ),
+        ];
+
+        let ambiguous_tokens = vec![grammar::AmbiguousToken::new(
+            String::from("IDENTIFIER"),
+            vec![String::from("VAR"), String::from("TYPE_DEF")],
+        )];
+
+        let grammar = Grammar::new(
+            start_symbol,
+            vec!["IDENTIFIER".to_string()], // Base token name
+            production_rules,
+            ambiguous_tokens,
+        )
+        .unwrap();
+        let glr_parser = Glr::new(grammar).unwrap();
+
+        let tokens = vec![Ok(MockToken {
+            name: "IDENTIFIER".to_string(),
+            value: Some("my_variable".to_string()),
+        })];
+
+        let result = glr_parser.parse(tokens.into_iter());
+        assert!(result.is_ok());
+
+        let cst = result.unwrap();
+        println!("CST: {}", cst);
+
+        assert_eq!(cst.name, "S'");
+        assert!(cst.children.is_some());
+
+        // The S' node's children should be the ambiguous paths directly.
+        let ambiguous_paths = match cst.children.as_ref().unwrap() {
+            CSTChildren::Ambiguous(paths) => paths,
+            _ => panic!("Expected Ambiguous children for S' node"),
+        };
+        assert_eq!(ambiguous_paths.len(), 2);
+
+        let mut found_decl = false;
+        let mut found_assign = false;
+
+        for path in ambiguous_paths {
+            if path.len() != 1 || path[0].name != "S" {
+                continue;
+            }
+
+            let Some(CSTChildren::Single(s_children)) = path[0].children.as_ref() else {
+                continue;
+            };
+
+            // S's child should be either Decl or Assign
+            if s_children.len() != 1 {
+                continue;
+            }
+
+            if s_children[0].name == "Decl" {
+                let Some(CSTChildren::Single(decl_children)) = s_children[0].children.as_ref()
+                else {
+                    continue;
+                };
+                if decl_children.len() == 1
+                    && decl_children[0].name == "TYPE_DEF"
+                    && decl_children[0].value == Some("my_variable".to_string())
+                {
+                    found_decl = true;
+                }
+            } else if s_children[0].name == "Assign" {
+                let Some(CSTChildren::Single(assign_children)) = s_children[0].children.as_ref()
+                else {
+                    continue;
+                };
+                if assign_children.len() == 1
+                    && assign_children[0].name == "VAR"
+                    && assign_children[0].value == Some("my_variable".to_string())
+                {
+                    found_assign = true;
+                }
+            }
+        }
+
+        println!("Found Decl: {found_decl}");
+        println!("Found Assign: {found_assign}");
+
+        assert!(
+            found_decl && found_assign,
+            "Both Decl and Assign parse trees were not found."
         );
     }
 }
