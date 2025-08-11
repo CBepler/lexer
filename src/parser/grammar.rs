@@ -25,6 +25,15 @@ pub struct AmbiguousToken {
     token_variations: Vec<String>,
 }
 
+impl AmbiguousToken {
+    pub fn new(base_token: String, token_variations: Vec<String>) -> Self {
+        AmbiguousToken {
+            base_token,
+            token_variations,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Grammar {
     pub production_rules: HashMap<String, Vec<Vec<Symbol>>>,
