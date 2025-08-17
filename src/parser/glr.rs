@@ -33,6 +33,7 @@ impl Glr {
     pub fn new(grammar: Grammar) -> Result<Self, String> {
         let (firsts, follows) = construct_firsts_follows(&grammar);
         let (states, start_id) = construct_states(&grammar);
+        println!("States: {:?}", states);
         Ok(Glr {
             grammar,
             firsts,
@@ -96,6 +97,7 @@ impl Glr {
             println!("Root ID: {:?}", root_id);
             let root = gss_map.get(&root_id).unwrap();
             let current_state_id = root.state.unwrap();
+            println!("Current State ID: {current_state_id}");
             let current_state = self.states.get(&current_state_id).unwrap();
             let mut terminals_to_process = Vec::new();
             if let Some(toks) = self.grammar.get_token_replacements(tok.get_name()) {
@@ -1300,5 +1302,121 @@ mod tests {
             found_decl && found_assign,
             "Both Decl and Assign parse trees were not found."
         );
+    }
+
+    #[test]
+    fn test_glr_complex_encompassing_grammar() {
+        // Grammar: simple arithmetic with parentheses and addition/multiplication
+        // Also has ambiguity in expression parsing without precedence rules
+        let start_symbol = String::from("Expr");
+        let production_rules = vec![
+            // Expr -> Expr + Term | Term
+            grammar::ProductionRule::new(
+                "Expr".to_string(),
+                vec![
+                    Symbol::NonTerminal("Expr".to_string()),
+                    Symbol::Terminal("+".to_string()),
+                    Symbol::NonTerminal("Term".to_string()),
+                ],
+            ),
+            grammar::ProductionRule::new(
+                "Expr".to_string(),
+                vec![Symbol::NonTerminal("Term".to_string())],
+            ),
+            // Term -> Term * Factor | Factor
+            grammar::ProductionRule::new(
+                "Term".to_string(),
+                vec![
+                    Symbol::NonTerminal("Term".to_string()),
+                    Symbol::Terminal("*".to_string()),
+                    Symbol::NonTerminal("Factor".to_string()),
+                ],
+            ),
+            grammar::ProductionRule::new(
+                "Term".to_string(),
+                vec![Symbol::NonTerminal("Factor".to_string())],
+            ),
+            // Factor -> ( Expr ) | number
+            grammar::ProductionRule::new(
+                "Factor".to_string(),
+                vec![
+                    Symbol::Terminal("(".to_string()),
+                    Symbol::NonTerminal("Expr".to_string()),
+                    Symbol::Terminal(")".to_string()),
+                ],
+            ),
+            grammar::ProductionRule::new(
+                "Factor".to_string(),
+                vec![Symbol::Terminal("num".to_string())],
+            ),
+        ];
+
+        let grammar = Grammar::new(
+            start_symbol,
+            vec![
+                "+".to_string(),
+                "*".to_string(),
+                "(".to_string(),
+                ")".to_string(),
+                "num".to_string(),
+            ],
+            production_rules,
+            Vec::new(),
+        )
+        .unwrap();
+
+        let glr_parser = Glr::new(grammar).unwrap();
+
+        // Input: (1 + 2) * 3 + 4
+        let tokens = vec![
+            MockToken {
+                name: "(".to_string(),
+                value: Some("(".to_string()),
+            },
+            MockToken {
+                name: "num".to_string(),
+                value: Some("1".to_string()),
+            },
+            MockToken {
+                name: "+".to_string(),
+                value: Some("+".to_string()),
+            },
+            MockToken {
+                name: "num".to_string(),
+                value: Some("2".to_string()),
+            },
+            MockToken {
+                name: ")".to_string(),
+                value: Some(")".to_string()),
+            },
+            MockToken {
+                name: "*".to_string(),
+                value: Some("*".to_string()),
+            },
+            MockToken {
+                name: "num".to_string(),
+                value: Some("3".to_string()),
+            },
+            MockToken {
+                name: "+".to_string(),
+                value: Some("+".to_string()),
+            },
+            MockToken {
+                name: "num".to_string(),
+                value: Some("4".to_string()),
+            },
+        ];
+
+        let result = glr_parser.parse(tokens.into_iter().map(Ok));
+
+        assert!(result.is_ok(), "Parser failed on complex grammar");
+        let cst = result.unwrap();
+
+        // This isn't asserting the full tree shape — just verifying the root matches the start symbol
+        assert_eq!(cst.name, "S'");
+        assert!(cst.children.is_some(), "Parse tree has no children");
+
+        // You could add debug prints here if you want to see the CST:
+        println!("{:#?}", cst);
     }
 }
